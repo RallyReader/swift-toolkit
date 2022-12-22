@@ -56,3 +56,5 @@ playground.xcworkspace
 ## IntelliJ
 out/
 
+/Readium.xcodeproj
+/Derived
