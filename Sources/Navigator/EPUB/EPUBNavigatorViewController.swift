@@ -617,6 +617,30 @@ open class EPUBNavigatorViewController: UIViewController, VisualNavigator, Selec
         return go(to: direction, animated: animated, completion: completion)
     }
 
+    public func getRectFromLocator(_ locator: Locator, completion: @escaping (CGRect?) -> Void) {
+        guard let locatorJson = locator.jsonString else {
+            completion(nil)
+            return
+        }
+        
+        let spreadView = loadedSpreadView(forHREF: locator.href)
+        spreadView?.evaluateScript("readium.rectFromLocator(\(locatorJson))", inHREF: locator.href, completion: { result in
+            DispatchQueue.main.async {
+                do {
+                    let readiumResult = try result.get()
+                    if let frame = CGRect(json: readiumResult) {
+                        let finalFrame = spreadView?.convertRectToNavigatorSpace(frame)
+                        completion(finalFrame)
+                    }
+                } catch {
+                    self.log(.error, error)
+                    completion(nil)
+                }
+            }
+        })
+    }
+
+    
     // MARK: – SelectableNavigator
 
     public var currentSelection: Selection? { editingActions.selection }

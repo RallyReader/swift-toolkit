@@ -1839,6 +1839,7 @@ __webpack_require__.r(__webpack_exports__);
 
 __webpack_require__.g.readium = {
   // utils
+  rectFromLocator: _utils__WEBPACK_IMPORTED_MODULE_2__.rectFromLocator,
   scrollToId: _utils__WEBPACK_IMPORTED_MODULE_2__.scrollToId,
   scrollToPosition: _utils__WEBPACK_IMPORTED_MODULE_2__.scrollToPosition,
   scrollToText: _utils__WEBPACK_IMPORTED_MODULE_2__.scrollToText,
@@ -2454,6 +2455,7 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */   "scrollLeft": () => (/* binding */ scrollLeft),
 /* harmony export */   "scrollRight": () => (/* binding */ scrollRight),
 /* harmony export */   "rangeFromLocator": () => (/* binding */ rangeFromLocator),
+/* harmony export */   "rectFromLocator": () => (/* binding */ rectFromLocator),
 /* harmony export */   "setProperty": () => (/* binding */ setProperty),
 /* harmony export */   "removeProperty": () => (/* binding */ removeProperty),
 /* harmony export */   "log": () => (/* binding */ log),
@@ -2462,6 +2464,7 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */ });
 /* harmony import */ var _vendor_hypothesis_anchoring_types__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./vendor/hypothesis/anchoring/types */ "./src/vendor/hypothesis/anchoring/types.js");
 /* harmony import */ var _selection__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./selection */ "./src/selection.js");
+/* harmony import */ var _rect__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ./rect */ "./src/rect.js");
 //
 //  Copyright 2021 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
@@ -2704,6 +2707,14 @@ function rangeFromLocator(locator) {
 } /// User Settings.
 // For setting user setting.
 
+function rectFromLocator(locator) {
+    let range = rangeFromLocator(locator);
+    if (!range) {
+        return null;
+    }
+    return (0,_rect__WEBPACK_IMPORTED_MODULE_2__.toNativeRect)(range.getBoundingClientRect());
+}
+      
 function setProperty(key, value) {
   var root = document.documentElement;
   root.style.setProperty(key, value);
