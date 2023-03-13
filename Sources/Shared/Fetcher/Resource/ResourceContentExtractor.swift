@@ -60,13 +60,16 @@ class _HTMLResourceContentExtractor: _ResourceContentExtractor {
         resource.readAsString()
             .flatMap { content in
                 do {
-                    // First try to parse a valid XML document, then fallback on SwiftSoup, which is slower.
-                    var text = parse(xml: content)
-                        ?? parse(html: content)
-                        ?? ""
+                    // Fuzi strips the HTML entities away when parsing the XML structure (we're missing characters like " ' etc)
+                    // Getting the unescaped content before parsing it seems to solve the issue
                     
                     // Transform HTML entities into their actual characters.
-                    text = try Entities.unescape(text)
+                    let unescapedContent = try Entities.unescape(content)
+                    
+                    // First try to parse a valid XML document, then fallback on SwiftSoup, which is slower.
+                    let text = parse(xml: unescapedContent)
+                        ?? parse(html: unescapedContent)
+                        ?? ""
                     
                     return .success(text)
 
