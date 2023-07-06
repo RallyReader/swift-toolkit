@@ -640,6 +640,16 @@ open class EPUBNavigatorViewController: UIViewController, VisualNavigator, Selec
         })
     }
 
+    public func currentSpreadDisplayingLastPage() -> Bool {
+        if let spreadView = paginationView.loadedViews[paginationView.currentIndex] as? EPUBSpreadView {
+            let offset = spreadView.scrollView.contentOffset.x
+            let contentWidth = spreadView.scrollView.contentSize.width
+            let pageWidth = spreadView.scrollView.bounds.width
+            
+            return offset+pageWidth >= contentWidth
+        }
+        return false
+    }
     
     // MARK: – SelectableNavigator
 
