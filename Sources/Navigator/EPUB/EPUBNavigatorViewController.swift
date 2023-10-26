@@ -671,8 +671,27 @@ open class EPUBNavigatorViewController: UIViewController, VisualNavigator, Selec
     public func supports(decorationStyle style: Decoration.Style.Id) -> Bool {
         config.decorationTemplates.keys.contains(style)
     }
+    
+    public func addDecorations(decorations: [Decoration], in group: String) {
+        let date = Date()
+        let source = self.decorations[group] ?? []
+        let target = decorations.map { DiffableDecoration(decoration: $0) }
+        
+        self.decorations[group]?.append(contentsOf: target)
+        
+        let decorationChanges = decorations.map {DecorationChange.add($0)}
+        
+        if let script = decorationChanges.javascript(forGroup: group, styles: config.decorationTemplates) {
+            self.loadedSpreadView(forHREF: decorations[0].locator.href)?.evaluateScript(script, inHREF: decorations[0].locator.href) { _ in
+                print("DECORATIONS :: time to apply decorations 2 \(-date.timeIntervalSinceNow) group: \(group)")
+            }
+        }
+        
+        print("DECORATIONS :: time to apply decorations \(-date.timeIntervalSinceNow) group: \(group)")
+    }
 
     public func apply(decorations: [Decoration], in group: String) {
+        let date = Date()
         let source = self.decorations[group] ?? []
         let target = decorations.map { DiffableDecoration(decoration: $0) }
 
@@ -693,8 +712,11 @@ open class EPUBNavigatorViewController: UIViewController, VisualNavigator, Selec
                 guard let script = changes.javascript(forGroup: group, styles: config.decorationTemplates) else {
                     continue
                 }
-                loadedSpreadView(forHREF: href)?.evaluateScript(script, inHREF: href)
+                loadedSpreadView(forHREF: href)?.evaluateScript(script, inHREF: href) { _ in
+//                    print("DECORATIONS :: time to apply decorations 2 \(-date.timeIntervalSinceNow) group: \(group)")
+                }
             }
+//            print("DECORATIONS :: time to apply decorations \(-date.timeIntervalSinceNow) group: \(group)")
         }
     }
 

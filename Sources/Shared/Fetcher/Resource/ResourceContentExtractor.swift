@@ -63,7 +63,7 @@ class _HTMLResourceContentExtractor: _ResourceContentExtractor {
                     // Fuzi strips the HTML entities away when parsing the XML structure (we're missing characters like " ' etc)
                     // Getting the unescaped content before parsing it seems to solve the issue
                     
-                    print("content before unescaping: \(content)")
+//                    print("content before unescaping: \(content)")
                     
                     // Transform HTML entities into their actual characters.
                     let unescapedContent = try Entities.unescape(content.replacingOccurrences(of: "<br/>", with: "br2n"))
@@ -73,7 +73,7 @@ class _HTMLResourceContentExtractor: _ResourceContentExtractor {
                         ?? parse(html: unescapedContent)
                         ?? ""
                     
-                    print("unescaped text: \(text)")
+//                    print("unescaped text: \(text)")
                     
                     return .success(text.replacingOccurrences(of: "br2n", with: "\n"))
 

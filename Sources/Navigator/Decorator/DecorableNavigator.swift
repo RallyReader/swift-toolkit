@@ -10,7 +10,12 @@ import R2Shared
 
 /// A navigator able to render arbitrary decorations over a publication.
 public protocol DecorableNavigator {
-
+    /// Adds additional decorations in the given decoration `group`.
+    ///
+    /// This does not refresh the existing list from the specified `group`
+    /// It is used to append decorations with the same efficiency even when the group gets big
+    func addDecorations(decorations: [Decoration], in group: String)
+    
     /// Declares the current state of the decorations in the given decoration `group`.
     ///
     /// The Navigator will decide when to actually render each decoration efficiently. Your only responsibility is to
