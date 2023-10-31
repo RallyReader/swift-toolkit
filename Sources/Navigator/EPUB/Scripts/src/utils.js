@@ -8,6 +8,7 @@
 
 import { TextQuoteAnchor } from "./vendor/hypothesis/anchoring/types";
 import { getCurrentSelection } from "./selection";
+import { toNativeRect } from "./rect";
 
 window.addEventListener(
   "error",
@@ -180,6 +181,14 @@ export function scrollToText(text) {
     return false;
   }
   return scrollToRange(range);
+}
+
+export function rectFromLocator(locator) {
+  let range = rangeFromLocator(locator);
+  if (!range) {
+    return null;
+  }
+  return toNativeRect(range.getBoundingClientRect());
 }
 
 function scrollToRange(range) {
