@@ -32,6 +32,12 @@ public protocol DecorableNavigator {
 
     /// Called when the user activates a decoration, e.g. with a click or tap.
     typealias OnActivatedCallback = (_ event: OnDecorationActivatedEvent) -> Void
+    
+    /// Adds additional decorations in the given decoration `group`.
+    ///
+    /// This does not refresh the existing list from the specified `group`
+    /// It is used to append decorations with the same efficiency even when the group gets big
+    func addDecorations(decorations: [Decoration], in group: String)
 }
 
 /// Holds the metadata about a decoration activation interaction.

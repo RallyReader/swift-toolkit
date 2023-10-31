@@ -768,6 +768,40 @@ open class EPUBNavigatorViewController: UIViewController,
         }()
         return go(to: direction, animated: animated, completion: completion)
     }
+    
+    public func getRectFromLocator(_ locator: Locator, completion: @escaping (CGRect?) -> Void) {
+        guard let locatorJson = locator.jsonString else {
+            completion(nil)
+            return
+        }
+        
+        let spreadView = loadedSpreadView(forHREF: locator.href)
+        spreadView?.evaluateScript("readium.rectFromLocator(\(locatorJson))", inHREF: locator.href, completion: { result in
+            DispatchQueue.main.async {
+                do {
+                    let readiumResult = try result.get()
+                    if let frame = CGRect(json: readiumResult) {
+                        let finalFrame = spreadView?.convertRectToNavigatorSpace(frame)
+                        completion(finalFrame)
+                    }
+                } catch {
+                    self.log(.error, error)
+                    completion(nil)
+                }
+            }
+        })
+    }
+    
+    public func currentSpreadDisplayingLastPage() -> Bool {
+        if let spreadView = paginationView.loadedViews[paginationView.currentIndex] as? EPUBSpreadView {
+            let offset = spreadView.scrollView.contentOffset.x
+            let contentWidth = spreadView.scrollView.contentSize.width
+            let pageWidth = spreadView.scrollView.bounds.width
+            
+            return offset+pageWidth >= contentWidth
+        }
+        return false
+    }
 
     // MARK: - SelectableNavigator
 
@@ -817,6 +851,25 @@ open class EPUBNavigatorViewController: UIViewController,
             }
         }
     }
+    
+    public func addDecorations(decorations: [Decoration], in group: String) {
+        let date = Date()
+        let source = self.decorations[group] ?? []
+        let target = decorations.map { DiffableDecoration(decoration: $0) }
+        
+        self.decorations[group]?.append(contentsOf: target)
+        
+        let decorationChanges = decorations.map {DecorationChange.add($0)}
+        
+        if let script = decorationChanges.javascript(forGroup: group, styles: config.decorationTemplates) {
+            self.loadedSpreadView(forHREF: decorations[0].locator.href)?.evaluateScript(script, inHREF: decorations[0].locator.href) { _ in
+                print("DECORATIONS :: time to apply decorations 2 \(-date.timeIntervalSinceNow) group: \(group)")
+            }
+        }
+        
+        print("DECORATIONS :: time to apply decorations \(-date.timeIntervalSinceNow) group: \(group)")
+    }
+
 
     public func observeDecorationInteractions(inGroup group: String, onActivated: OnActivatedCallback?) {
         guard let onActivated = onActivated else {

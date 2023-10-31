@@ -18,6 +18,7 @@ import {
   scrollToText,
   setProperty,
   setCSSProperties,
+  rectFromLocator,
 } from "./utils";
 import { getDecorations, registerTemplates } from "./decorator";
 
@@ -32,6 +33,7 @@ global.readium = {
   setCSSProperties: setCSSProperties,
   setProperty: setProperty,
   removeProperty: removeProperty,
+  rectFromLocator: rectFromLocator,
 
   // decoration
   registerDecorationTemplates: registerTemplates,

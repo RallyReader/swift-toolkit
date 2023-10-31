@@ -1781,6 +1781,7 @@ __webpack_require__.g.readium = {
   setCSSProperties: _utils__WEBPACK_IMPORTED_MODULE_3__.setCSSProperties,
   setProperty: _utils__WEBPACK_IMPORTED_MODULE_3__.setProperty,
   removeProperty: _utils__WEBPACK_IMPORTED_MODULE_3__.removeProperty,
+  rectFromLocator: _utils__WEBPACK_IMPORTED_MODULE_3__.rectFromLocator,
   // decoration
   registerDecorationTemplates: _decorator__WEBPACK_IMPORTED_MODULE_4__.registerTemplates,
   getDecorations: _decorator__WEBPACK_IMPORTED_MODULE_4__.getDecorations,
@@ -2354,6 +2355,7 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */   logError: () => (/* binding */ logError),
 /* harmony export */   logErrorMessage: () => (/* binding */ logErrorMessage),
 /* harmony export */   rangeFromLocator: () => (/* binding */ rangeFromLocator),
+/* harmony export */   rectFromLocator: () => (/* binding */ rectFromLocator),
 /* harmony export */   removeProperty: () => (/* binding */ removeProperty),
 /* harmony export */   scrollLeft: () => (/* binding */ scrollLeft),
 /* harmony export */   scrollRight: () => (/* binding */ scrollRight),
@@ -2365,6 +2367,7 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */ });
 /* harmony import */ var _vendor_hypothesis_anchoring_types__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./vendor/hypothesis/anchoring/types */ "./src/vendor/hypothesis/anchoring/types.js");
 /* harmony import */ var _selection__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./selection */ "./src/selection.js");
+/* harmony import */ var _rect__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ./rect */ "./src/rect.js");
 //
 //  Copyright 2021 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
@@ -2372,6 +2375,7 @@ __webpack_require__.r(__webpack_exports__);
 //
 
 // Catch JS errors to log them in the app.
+
 
 
 
@@ -2510,6 +2514,13 @@ function scrollToText(text) {
     return false;
   }
   return scrollToRange(range);
+}
+function rectFromLocator(locator) {
+  let range = rangeFromLocator(locator);
+  if (!range) {
+    return null;
+  }
+  return (0,_rect__WEBPACK_IMPORTED_MODULE_2__.toNativeRect)(range.getBoundingClientRect());
 }
 function scrollToRange(range) {
   return scrollToRect(range.getBoundingClientRect());
@@ -3627,12 +3638,13 @@ module.exports = function callBoundIntrinsic(name, allowMissing) {
 
 var bind = __webpack_require__(/*! function-bind */ "./node_modules/function-bind/index.js");
 var GetIntrinsic = __webpack_require__(/*! get-intrinsic */ "./node_modules/get-intrinsic/index.js");
+var setFunctionLength = __webpack_require__(/*! set-function-length */ "./node_modules/set-function-length/index.js");
 
+var $TypeError = GetIntrinsic('%TypeError%');
 var $apply = GetIntrinsic('%Function.prototype.apply%');
 var $call = GetIntrinsic('%Function.prototype.call%');
 var $reflectApply = GetIntrinsic('%Reflect.apply%', true) || bind.call($call, $apply);
 
-var $gOPD = GetIntrinsic('%Object.getOwnPropertyDescriptor%', true);
 var $defineProperty = GetIntrinsic('%Object.defineProperty%', true);
 var $max = GetIntrinsic('%Math.max%');
 
@@ -3646,19 +3658,15 @@ if ($defineProperty) {
 }
 
 module.exports = function callBind(originalFunction) {
-	var func = $reflectApply(bind, $call, arguments);
-	if ($gOPD && $defineProperty) {
-		var desc = $gOPD(func, 'length');
-		if (desc.configurable) {
-			// original length, plus the receiver, minus any additional arguments (after the receiver)
-			$defineProperty(
-				func,
-				'length',
-				{ value: 1 + $max(0, originalFunction.length - (arguments.length - 1)) }
-			);
-		}
+	if (typeof originalFunction !== 'function') {
+		throw new $TypeError('a function is required');
 	}
-	return func;
+	var func = $reflectApply(bind, $call, arguments);
+	return setFunctionLength(
+		func,
+		1 + $max(0, originalFunction.length - (arguments.length - 1)),
+		true
+	);
 };
 
 var applyBind = function applyBind() {
@@ -3688,6 +3696,14 @@ var hasPropertyDescriptors = __webpack_require__(/*! has-property-descriptors */
 var GetIntrinsic = __webpack_require__(/*! get-intrinsic */ "./node_modules/get-intrinsic/index.js");
 
 var $defineProperty = hasPropertyDescriptors && GetIntrinsic('%Object.defineProperty%', true);
+if ($defineProperty) {
+	try {
+		$defineProperty({}, 'a', { value: 1 });
+	} catch (e) {
+		// IE 8 has a broken defineProperty
+		$defineProperty = false;
+	}
+}
 
 var $SyntaxError = GetIntrinsic('%SyntaxError%');
 var $TypeError = GetIntrinsic('%TypeError%');
@@ -3817,13 +3833,13 @@ var GetIntrinsic = __webpack_require__(/*! get-intrinsic */ "./node_modules/get-
 var $defineProperty = GetIntrinsic('%Object.defineProperty%', true);
 
 var hasToStringTag = __webpack_require__(/*! has-tostringtag/shams */ "./node_modules/has-tostringtag/shams.js")();
-var has = __webpack_require__(/*! has */ "./node_modules/has/src/index.js");
+var hasOwn = __webpack_require__(/*! hasown */ "./node_modules/hasown/index.js");
 
 var toStringTag = hasToStringTag ? Symbol.toStringTag : null;
 
 module.exports = function setToStringTag(object, value) {
 	var overrideIfSet = arguments.length > 2 && arguments[2] && arguments[2].force;
-	if (toStringTag && (overrideIfSet || !has(object, toStringTag))) {
+	if (toStringTag && (overrideIfSet || !hasOwn(object, toStringTag))) {
 		if ($defineProperty) {
 			$defineProperty(object, toStringTag, {
 				configurable: true,
@@ -3954,43 +3970,75 @@ module.exports = function isPrimitive(value) {
 /* eslint no-invalid-this: 1 */
 
 var ERROR_MESSAGE = 'Function.prototype.bind called on incompatible ';
-var slice = Array.prototype.slice;
 var toStr = Object.prototype.toString;
+var max = Math.max;
 var funcType = '[object Function]';
+
+var concatty = function concatty(a, b) {
+    var arr = [];
+
+    for (var i = 0; i < a.length; i += 1) {
+        arr[i] = a[i];
+    }
+    for (var j = 0; j < b.length; j += 1) {
+        arr[j + a.length] = b[j];
+    }
+
+    return arr;
+};
+
+var slicy = function slicy(arrLike, offset) {
+    var arr = [];
+    for (var i = offset || 0, j = 0; i < arrLike.length; i += 1, j += 1) {
+        arr[j] = arrLike[i];
+    }
+    return arr;
+};
+
+var joiny = function (arr, joiner) {
+    var str = '';
+    for (var i = 0; i < arr.length; i += 1) {
+        str += arr[i];
+        if (i + 1 < arr.length) {
+            str += joiner;
+        }
+    }
+    return str;
+};
 
 module.exports = function bind(that) {
     var target = this;
-    if (typeof target !== 'function' || toStr.call(target) !== funcType) {
+    if (typeof target !== 'function' || toStr.apply(target) !== funcType) {
         throw new TypeError(ERROR_MESSAGE + target);
     }
-    var args = slice.call(arguments, 1);
+    var args = slicy(arguments, 1);
 
     var bound;
     var binder = function () {
         if (this instanceof bound) {
             var result = target.apply(
                 this,
-                args.concat(slice.call(arguments))
+                concatty(args, arguments)
             );
             if (Object(result) === result) {
                 return result;
             }
             return this;
-        } else {
-            return target.apply(
-                that,
-                args.concat(slice.call(arguments))
-            );
         }
+        return target.apply(
+            that,
+            concatty(args, arguments)
+        );
+
     };
 
-    var boundLength = Math.max(0, target.length - args.length);
+    var boundLength = max(0, target.length - args.length);
     var boundArgs = [];
     for (var i = 0; i < boundLength; i++) {
-        boundArgs.push('$' + i);
+        boundArgs[i] = '$' + i;
     }
 
-    bound = Function('binder', 'return function (' + boundArgs.join(',') + '){ return binder.apply(this,arguments); }')(binder);
+    bound = Function('binder', 'return function (' + joiny(boundArgs, ',') + '){ return binder.apply(this,arguments); }')(binder);
 
     if (target.prototype) {
         var Empty = function Empty() {};
@@ -4286,7 +4334,7 @@ var LEGACY_ALIASES = {
 };
 
 var bind = __webpack_require__(/*! function-bind */ "./node_modules/function-bind/index.js");
-var hasOwn = __webpack_require__(/*! has */ "./node_modules/has/src/index.js");
+var hasOwn = __webpack_require__(/*! hasown */ "./node_modules/hasown/index.js");
 var $concat = bind.call(Function.call, Array.prototype.concat);
 var $spliceApply = bind.call(Function.apply, Array.prototype.splice);
 var $replace = bind.call(Function.call, String.prototype.replace);
@@ -4613,18 +4661,21 @@ module.exports = function hasToStringTagShams() {
 
 /***/ }),
 
-/***/ "./node_modules/has/src/index.js":
-/*!***************************************!*\
-  !*** ./node_modules/has/src/index.js ***!
-  \***************************************/
+/***/ "./node_modules/hasown/index.js":
+/*!**************************************!*\
+  !*** ./node_modules/hasown/index.js ***!
+  \**************************************/
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 "use strict";
 
 
+var call = Function.prototype.call;
+var $hasOwn = Object.prototype.hasOwnProperty;
 var bind = __webpack_require__(/*! function-bind */ "./node_modules/function-bind/index.js");
 
-module.exports = bind.call(Function.call, Object.prototype.hasOwnProperty);
+/** @type {(o: {}, p: PropertyKey) => p is keyof o} */
+module.exports = bind.call(call, $hasOwn);
 
 
 /***/ }),
@@ -4639,7 +4690,7 @@ module.exports = bind.call(Function.call, Object.prototype.hasOwnProperty);
 
 
 var GetIntrinsic = __webpack_require__(/*! get-intrinsic */ "./node_modules/get-intrinsic/index.js");
-var has = __webpack_require__(/*! has */ "./node_modules/has/src/index.js");
+var hasOwn = __webpack_require__(/*! hasown */ "./node_modules/hasown/index.js");
 var channel = __webpack_require__(/*! side-channel */ "./node_modules/side-channel/index.js")();
 
 var $TypeError = GetIntrinsic('%TypeError%');
@@ -4675,7 +4726,7 @@ var SLOT = {
 			throw new $TypeError('`slot` must be a string');
 		}
 		var slots = channel.get(O);
-		return !!slots && has(slots, '$' + slot);
+		return !!slots && hasOwn(slots, '$' + slot);
 	},
 	set: function (O, slot, V) {
 		if (!O || (typeof O !== 'object' && typeof O !== 'function')) {
@@ -5208,6 +5259,14 @@ module.exports = function inspect_(obj, options, depth, seen) {
     }
     if (isString(obj)) {
         return markBoxed(inspect(String(obj)));
+    }
+    // note: in IE 8, sometimes `global !== window` but both are the prototypes of each other
+    /* eslint-env browser */
+    if (typeof window !== 'undefined' && obj === window) {
+        return '{ [object Window] }';
+    }
+    if (obj === __webpack_require__.g) {
+        return '{ [object globalThis] }';
     }
     if (!isDate(obj) && !isRegExp(obj)) {
         var ys = arrObjKeys(obj, inspect);
@@ -5878,6 +5937,58 @@ module.exports = function regexTester(regex) {
 	return function test(s) {
 		return $exec(regex, s) !== null;
 	};
+};
+
+
+/***/ }),
+
+/***/ "./node_modules/set-function-length/index.js":
+/*!***************************************************!*\
+  !*** ./node_modules/set-function-length/index.js ***!
+  \***************************************************/
+/***/ ((module, __unused_webpack_exports, __webpack_require__) => {
+
+"use strict";
+
+
+var GetIntrinsic = __webpack_require__(/*! get-intrinsic */ "./node_modules/get-intrinsic/index.js");
+var define = __webpack_require__(/*! define-data-property */ "./node_modules/define-data-property/index.js");
+var hasDescriptors = __webpack_require__(/*! has-property-descriptors */ "./node_modules/has-property-descriptors/index.js")();
+var gOPD = __webpack_require__(/*! gopd */ "./node_modules/gopd/index.js");
+
+var $TypeError = GetIntrinsic('%TypeError%');
+var $floor = GetIntrinsic('%Math.floor%');
+
+module.exports = function setFunctionLength(fn, length) {
+	if (typeof fn !== 'function') {
+		throw new $TypeError('`fn` is not a function');
+	}
+	if (typeof length !== 'number' || length < 0 || length > 0xFFFFFFFF || $floor(length) !== length) {
+		throw new $TypeError('`length` must be a positive 32-bit integer');
+	}
+
+	var loose = arguments.length > 2 && !!arguments[2];
+
+	var functionLengthIsConfigurable = true;
+	var functionLengthIsWritable = true;
+	if ('length' in fn && gOPD) {
+		var desc = gOPD(fn, 'length');
+		if (desc && !desc.configurable) {
+			functionLengthIsConfigurable = false;
+		}
+		if (desc && !desc.writable) {
+			functionLengthIsWritable = false;
+		}
+	}
+
+	if (functionLengthIsConfigurable || functionLengthIsWritable || !loose) {
+		if (hasDescriptors) {
+			define(fn, 'length', length, true, true);
+		} else {
+			define(fn, 'length', length);
+		}
+	}
+	return fn;
 };
 
 
@@ -7006,7 +7117,7 @@ module.exports = function GetV(V, P) {
 "use strict";
 
 
-var has = __webpack_require__(/*! has */ "./node_modules/has/src/index.js");
+var hasOwn = __webpack_require__(/*! hasown */ "./node_modules/hasown/index.js");
 
 var Type = __webpack_require__(/*! ./Type */ "./node_modules/es-abstract/2023/Type.js");
 
@@ -7021,7 +7132,7 @@ module.exports = function IsAccessorDescriptor(Desc) {
 
 	assertRecord(Type, 'Property Descriptor', 'Desc', Desc);
 
-	if (!has(Desc, '[[Get]]') && !has(Desc, '[[Set]]')) {
+	if (!hasOwn(Desc, '[[Get]]') && !hasOwn(Desc, '[[Set]]')) {
 		return false;
 	}
 
@@ -7122,7 +7233,7 @@ if (DefinePropertyOrThrow && $construct) {
 "use strict";
 
 
-var has = __webpack_require__(/*! has */ "./node_modules/has/src/index.js");
+var hasOwn = __webpack_require__(/*! hasown */ "./node_modules/hasown/index.js");
 
 var Type = __webpack_require__(/*! ./Type */ "./node_modules/es-abstract/2023/Type.js");
 
@@ -7137,7 +7248,7 @@ module.exports = function IsDataDescriptor(Desc) {
 
 	assertRecord(Type, 'Property Descriptor', 'Desc', Desc);
 
-	if (!has(Desc, '[[Value]]') && !has(Desc, '[[Writable]]')) {
+	if (!hasOwn(Desc, '[[Value]]') && !hasOwn(Desc, '[[Writable]]')) {
 		return false;
 	}
 
@@ -7640,7 +7751,7 @@ module.exports = function ToPrimitive(input) {
 "use strict";
 
 
-var has = __webpack_require__(/*! has */ "./node_modules/has/src/index.js");
+var hasOwn = __webpack_require__(/*! hasown */ "./node_modules/hasown/index.js");
 
 var GetIntrinsic = __webpack_require__(/*! get-intrinsic */ "./node_modules/get-intrinsic/index.js");
 
@@ -7658,26 +7769,26 @@ module.exports = function ToPropertyDescriptor(Obj) {
 	}
 
 	var desc = {};
-	if (has(Obj, 'enumerable')) {
+	if (hasOwn(Obj, 'enumerable')) {
 		desc['[[Enumerable]]'] = ToBoolean(Obj.enumerable);
 	}
-	if (has(Obj, 'configurable')) {
+	if (hasOwn(Obj, 'configurable')) {
 		desc['[[Configurable]]'] = ToBoolean(Obj.configurable);
 	}
-	if (has(Obj, 'value')) {
+	if (hasOwn(Obj, 'value')) {
 		desc['[[Value]]'] = Obj.value;
 	}
-	if (has(Obj, 'writable')) {
+	if (hasOwn(Obj, 'writable')) {
 		desc['[[Writable]]'] = ToBoolean(Obj.writable);
 	}
-	if (has(Obj, 'get')) {
+	if (hasOwn(Obj, 'get')) {
 		var getter = Obj.get;
 		if (typeof getter !== 'undefined' && !IsCallable(getter)) {
 			throw new $TypeError('getter must be a function');
 		}
 		desc['[[Get]]'] = getter;
 	}
-	if (has(Obj, 'set')) {
+	if (hasOwn(Obj, 'set')) {
 		var setter = Obj.set;
 		if (typeof setter !== 'undefined' && !IsCallable(setter)) {
 			throw new $TypeError('setter must be a function');
@@ -7685,7 +7796,7 @@ module.exports = function ToPropertyDescriptor(Obj) {
 		desc['[[Set]]'] = setter;
 	}
 
-	if ((has(desc, '[[Get]]') || has(desc, '[[Set]]')) && (has(desc, '[[Value]]') || has(desc, '[[Writable]]'))) {
+	if ((hasOwn(desc, '[[Get]]') || hasOwn(desc, '[[Set]]')) && (hasOwn(desc, '[[Value]]') || hasOwn(desc, '[[Writable]]'))) {
 		throw new $TypeError('Invalid property descriptor. Cannot both specify accessors and a value or writable attribute');
 	}
 	return desc;
@@ -8010,7 +8121,7 @@ var GetIntrinsic = __webpack_require__(/*! get-intrinsic */ "./node_modules/get-
 var $TypeError = GetIntrinsic('%TypeError%');
 var $SyntaxError = GetIntrinsic('%SyntaxError%');
 
-var has = __webpack_require__(/*! has */ "./node_modules/has/src/index.js");
+var hasOwn = __webpack_require__(/*! hasown */ "./node_modules/hasown/index.js");
 var isInteger = __webpack_require__(/*! ./isInteger */ "./node_modules/es-abstract/helpers/isInteger.js");
 
 var isMatchRecord = __webpack_require__(/*! ./isMatchRecord */ "./node_modules/es-abstract/helpers/isMatchRecord.js");
@@ -8031,13 +8142,13 @@ var predicates = {
 			return false;
 		}
 		for (var key in Desc) { // eslint-disable-line
-			if (has(Desc, key) && !allowed[key]) {
+			if (hasOwn(Desc, key) && !allowed[key]) {
 				return false;
 			}
 		}
 
-		var isData = has(Desc, '[[Value]]');
-		var IsAccessor = has(Desc, '[[Get]]') || has(Desc, '[[Set]]');
+		var isData = hasOwn(Desc, '[[Value]]');
+		var IsAccessor = hasOwn(Desc, '[[Get]]') || hasOwn(Desc, '[[Set]]');
 		if (isData && IsAccessor) {
 			throw new $TypeError('Property Descriptors may not be both accessor and data descriptors');
 		}
@@ -8046,35 +8157,35 @@ var predicates = {
 	// https://262.ecma-international.org/13.0/#sec-match-records
 	'Match Record': isMatchRecord,
 	'Iterator Record': function isIteratorRecord(value) {
-		return has(value, '[[Iterator]]') && has(value, '[[NextMethod]]') && has(value, '[[Done]]');
+		return hasOwn(value, '[[Iterator]]') && hasOwn(value, '[[NextMethod]]') && hasOwn(value, '[[Done]]');
 	},
 	'PromiseCapability Record': function isPromiseCapabilityRecord(value) {
 		return !!value
-			&& has(value, '[[Resolve]]')
+			&& hasOwn(value, '[[Resolve]]')
 			&& typeof value['[[Resolve]]'] === 'function'
-			&& has(value, '[[Reject]]')
+			&& hasOwn(value, '[[Reject]]')
 			&& typeof value['[[Reject]]'] === 'function'
-			&& has(value, '[[Promise]]')
+			&& hasOwn(value, '[[Promise]]')
 			&& value['[[Promise]]']
 			&& typeof value['[[Promise]]'].then === 'function';
 	},
 	'AsyncGeneratorRequest Record': function isAsyncGeneratorRequestRecord(value) {
 		return !!value
-			&& has(value, '[[Completion]]') // TODO: confirm is a completion record
-			&& has(value, '[[Capability]]')
+			&& hasOwn(value, '[[Completion]]') // TODO: confirm is a completion record
+			&& hasOwn(value, '[[Capability]]')
 			&& predicates['PromiseCapability Record'](value['[[Capability]]']);
 	},
 	'RegExp Record': function isRegExpRecord(value) {
 		return value
-			&& has(value, '[[IgnoreCase]]')
+			&& hasOwn(value, '[[IgnoreCase]]')
 			&& typeof value['[[IgnoreCase]]'] === 'boolean'
-			&& has(value, '[[Multiline]]')
+			&& hasOwn(value, '[[Multiline]]')
 			&& typeof value['[[Multiline]]'] === 'boolean'
-			&& has(value, '[[DotAll]]')
+			&& hasOwn(value, '[[DotAll]]')
 			&& typeof value['[[DotAll]]'] === 'boolean'
-			&& has(value, '[[Unicode]]')
+			&& hasOwn(value, '[[Unicode]]')
 			&& typeof value['[[Unicode]]'] === 'boolean'
-			&& has(value, '[[CapturingGroupsCount]]')
+			&& hasOwn(value, '[[CapturingGroupsCount]]')
 			&& typeof value['[[CapturingGroupsCount]]'] === 'number'
 			&& isInteger(value['[[CapturingGroupsCount]]'])
 			&& value['[[CapturingGroupsCount]]'] >= 0;
@@ -8220,14 +8331,14 @@ module.exports = function isLeadingSurrogate(charCode) {
 "use strict";
 
 
-var has = __webpack_require__(/*! has */ "./node_modules/has/src/index.js");
+var hasOwn = __webpack_require__(/*! hasown */ "./node_modules/hasown/index.js");
 
 // https://262.ecma-international.org/13.0/#sec-match-records
 
 module.exports = function isMatchRecord(record) {
 	return (
-		has(record, '[[StartIndex]]')
-        && has(record, '[[EndIndex]]')
+		hasOwn(record, '[[StartIndex]]')
+        && hasOwn(record, '[[EndIndex]]')
         && record['[[StartIndex]]'] >= 0
         && record['[[EndIndex]]'] >= record['[[StartIndex]]']
         && String(parseInt(record['[[StartIndex]]'], 10)) === String(record['[[StartIndex]]'])
@@ -8281,7 +8392,7 @@ module.exports = function isPrimitive(value) {
 
 var GetIntrinsic = __webpack_require__(/*! get-intrinsic */ "./node_modules/get-intrinsic/index.js");
 
-var has = __webpack_require__(/*! has */ "./node_modules/has/src/index.js");
+var hasOwn = __webpack_require__(/*! hasown */ "./node_modules/hasown/index.js");
 var $TypeError = GetIntrinsic('%TypeError%');
 
 module.exports = function IsPropertyDescriptor(ES, Desc) {
@@ -8298,7 +8409,7 @@ module.exports = function IsPropertyDescriptor(ES, Desc) {
 	};
 
 	for (var key in Desc) { // eslint-disable-line no-restricted-syntax
-		if (has(Desc, key) && !allowed[key]) {
+		if (hasOwn(Desc, key) && !allowed[key]) {
 			return false;
 		}
 	}
@@ -8351,52 +8462,31 @@ module.exports = Number.MAX_SAFE_INTEGER || 9007199254740991; // Math.pow(2, 53)
 "use strict";
 __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
-/* harmony export */   CHILD_OPERATOR: () => (/* binding */ CHILD_OPERATOR),
-/* harmony export */   DESCENDANT_OPERATOR: () => (/* binding */ DESCENDANT_OPERATOR),
 /* harmony export */   INVALID_CLASS_RE: () => (/* binding */ INVALID_CLASS_RE),
 /* harmony export */   INVALID_ID_RE: () => (/* binding */ INVALID_ID_RE),
-/* harmony export */   NONE_OPERATOR: () => (/* binding */ NONE_OPERATOR),
-/* harmony export */   OPERATOR_DATA: () => (/* binding */ OPERATOR_DATA),
 /* harmony export */   SELECTOR_PATTERN: () => (/* binding */ SELECTOR_PATTERN),
 /* harmony export */   SELECTOR_SEPARATOR: () => (/* binding */ SELECTOR_SEPARATOR)
 /* harmony export */ });
 /* harmony import */ var _types_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./types.js */ "./node_modules/css-selector-generator/esm/types.js");
 
-const NONE_OPERATOR = '';
-const DESCENDANT_OPERATOR = ' > ';
-const CHILD_OPERATOR = ' ';
-const OPERATOR_DATA = {
-    [_types_js__WEBPACK_IMPORTED_MODULE_0__.OPERATOR.NONE]: {
-        type: _types_js__WEBPACK_IMPORTED_MODULE_0__.OPERATOR.NONE,
-        value: NONE_OPERATOR
-    },
-    [_types_js__WEBPACK_IMPORTED_MODULE_0__.OPERATOR.DESCENDANT]: {
-        type: _types_js__WEBPACK_IMPORTED_MODULE_0__.OPERATOR.DESCENDANT,
-        value: DESCENDANT_OPERATOR
-    },
-    [_types_js__WEBPACK_IMPORTED_MODULE_0__.OPERATOR.CHILD]: {
-        type: _types_js__WEBPACK_IMPORTED_MODULE_0__.OPERATOR.CHILD,
-        value: CHILD_OPERATOR
-    }
-};
-const SELECTOR_SEPARATOR = ', ';
+const SELECTOR_SEPARATOR = ", ";
 // RegExp that will match invalid patterns that can be used in ID attribute.
 const INVALID_ID_RE = new RegExp([
-    '^$',
-    '\\s', // contains whitespace
-].join('|'));
+    "^$",
+    "\\s", // contains whitespace
+].join("|"));
 // RegExp that will match invalid patterns that can be used in class attribute.
 const INVALID_CLASS_RE = new RegExp([
-    '^$', // empty or not set
-].join('|'));
+    "^$", // empty or not set
+].join("|"));
 // Order in which a combined selector is constructed.
 const SELECTOR_PATTERN = [
-    _types_js__WEBPACK_IMPORTED_MODULE_0__.CssSelectorType.nthoftype,
-    _types_js__WEBPACK_IMPORTED_MODULE_0__.CssSelectorType.tag,
-    _types_js__WEBPACK_IMPORTED_MODULE_0__.CssSelectorType.id,
-    _types_js__WEBPACK_IMPORTED_MODULE_0__.CssSelectorType.class,
-    _types_js__WEBPACK_IMPORTED_MODULE_0__.CssSelectorType.attribute,
-    _types_js__WEBPACK_IMPORTED_MODULE_0__.CssSelectorType.nthchild
+    _types_js__WEBPACK_IMPORTED_MODULE_0__.CSS_SELECTOR_TYPE.nthoftype,
+    _types_js__WEBPACK_IMPORTED_MODULE_0__.CSS_SELECTOR_TYPE.tag,
+    _types_js__WEBPACK_IMPORTED_MODULE_0__.CSS_SELECTOR_TYPE.id,
+    _types_js__WEBPACK_IMPORTED_MODULE_0__.CSS_SELECTOR_TYPE.class,
+    _types_js__WEBPACK_IMPORTED_MODULE_0__.CSS_SELECTOR_TYPE.attribute,
+    _types_js__WEBPACK_IMPORTED_MODULE_0__.CSS_SELECTOR_TYPE.nthchild,
 ];
 //# sourceMappingURL=constants.js.map
 
@@ -8430,7 +8520,7 @@ __webpack_require__.r(__webpack_exports__);
 function getCssSelector(needle, custom_options = {}) {
     const elements = (0,_utilities_selectors_js__WEBPACK_IMPORTED_MODULE_2__.sanitizeSelectorNeedle)(needle);
     const options = (0,_utilities_options_js__WEBPACK_IMPORTED_MODULE_1__.sanitizeOptions)(elements[0], custom_options);
-    let partialSelector = '';
+    let partialSelector = "";
     let currentRoot = options.root;
     /**
      * Utility function to make subsequent calls shorter.
@@ -8440,7 +8530,7 @@ function getCssSelector(needle, custom_options = {}) {
     }
     let closestIdentifiableParent = updateIdentifiableParent();
     while (closestIdentifiableParent) {
-        const { foundElements, selector, } = closestIdentifiableParent;
+        const { foundElements, selector } = closestIdentifiableParent;
         if ((0,_utilities_dom_js__WEBPACK_IMPORTED_MODULE_3__.testSelector)(elements, selector, options.root)) {
             return selector;
         }
@@ -8484,10 +8574,10 @@ __webpack_require__.r(__webpack_exports__);
 
 // List of attributes to be ignored. These are handled by different selector types.
 const attributeBlacklistMatch = (0,_utilities_data_js__WEBPACK_IMPORTED_MODULE_1__.createPatternMatcher)([
-    'class',
-    'id',
+    "class",
+    "id",
     // Angular attributes
-    'ng-*',
+    "ng-*",
 ]);
 /**
  * Get simplified attribute selector for an element.
@@ -8508,7 +8598,7 @@ function attributeNodeToSelector({ nodeName, nodeValue, }) {
 function isValidAttributeNode({ nodeName }, element) {
     // form input value should not be used as a selector
     const tagName = element.tagName.toLowerCase();
-    if (['input', 'option'].includes(tagName) && nodeName === 'value') {
+    if (["input", "option"].includes(tagName) && nodeName === "value") {
         return false;
     }
     return !attributeBlacklistMatch(nodeName);
@@ -8517,8 +8607,7 @@ function isValidAttributeNode({ nodeName }, element) {
  * Get attribute selectors for an element.
  */
 function getElementAttributeSelectors(element) {
-    const validAttributes = Array.from(element.attributes)
-        .filter((attributeNode) => isValidAttributeNode(attributeNode, element));
+    const validAttributes = Array.from(element.attributes).filter((attributeNode) => isValidAttributeNode(attributeNode, element));
     return [
         ...validAttributes.map(attributeNodeToSimplifiedSelector),
         ...validAttributes.map(attributeNodeToSelector),
@@ -8557,7 +8646,7 @@ __webpack_require__.r(__webpack_exports__);
  * Get class selectors for an element.
  */
 function getElementClassSelectors(element) {
-    return (element.getAttribute('class') || '')
+    return (element.getAttribute("class") || "")
         .trim()
         .split(/\s+/)
         .filter((item) => !_constants_js__WEBPACK_IMPORTED_MODULE_1__.INVALID_CLASS_RE.test(item))
@@ -8600,13 +8689,13 @@ __webpack_require__.r(__webpack_exports__);
 function getElementFallbackSelector(element) {
     const parentElements = (0,_utilities_dom_js__WEBPACK_IMPORTED_MODULE_0__.getElementParents)(element).reverse();
     const elementsData = parentElements.map((element) => {
-        const elementData = (0,_utilities_element_data_js__WEBPACK_IMPORTED_MODULE_3__.createElementData)(element, [_types_js__WEBPACK_IMPORTED_MODULE_2__.CssSelectorType.nthchild], _types_js__WEBPACK_IMPORTED_MODULE_2__.OPERATOR.DESCENDANT);
+        const elementData = (0,_utilities_element_data_js__WEBPACK_IMPORTED_MODULE_3__.createElementData)(element, [_types_js__WEBPACK_IMPORTED_MODULE_2__.CSS_SELECTOR_TYPE.nthchild], _types_js__WEBPACK_IMPORTED_MODULE_2__.OPERATOR.CHILD);
         elementData.selectors.nthchild.forEach((selectorData) => {
             selectorData.include = true;
         });
         return elementData;
     });
-    return [':root', ...elementsData.map(_utilities_element_data_js__WEBPACK_IMPORTED_MODULE_3__.constructElementSelector)].join('');
+    return [":root", ...elementsData.map(_utilities_element_data_js__WEBPACK_IMPORTED_MODULE_3__.constructElementSelector)].join("");
 }
 /**
  * Creates chain of :nth-child selectors from root to the elements.
@@ -8640,11 +8729,10 @@ __webpack_require__.r(__webpack_exports__);
  * Get ID selector for an element.
  * */
 function getElementIdSelectors(element) {
-    const id = element.getAttribute('id') || '';
+    const id = element.getAttribute("id") || "";
     const selector = `#${(0,_utilities_selectors_js__WEBPACK_IMPORTED_MODULE_0__.sanitizeSelectorItem)(id)}`;
     const rootNode = element.getRootNode({ composed: false });
-    return (!_constants_js__WEBPACK_IMPORTED_MODULE_1__.INVALID_ID_RE.test(id)
-        && (0,_utilities_dom_js__WEBPACK_IMPORTED_MODULE_2__.testSelector)([element], selector, rootNode))
+    return !_constants_js__WEBPACK_IMPORTED_MODULE_1__.INVALID_ID_RE.test(id) && (0,_utilities_dom_js__WEBPACK_IMPORTED_MODULE_2__.testSelector)([element], selector, rootNode)
         ? [selector]
         : [];
 }
@@ -8652,7 +8740,7 @@ function getElementIdSelectors(element) {
  * Get ID selector for an element.
  */
 function getIdSelector(elements) {
-    return (elements.length === 0 || elements.length > 1)
+    return elements.length === 0 || elements.length > 1
         ? []
         : getElementIdSelectors(elements[0]);
 }
@@ -8723,12 +8811,12 @@ function getElementNthOfTypeSelector(element) {
     const tag = (0,_selector_tag_js__WEBPACK_IMPORTED_MODULE_0__.getTagSelector)([element])[0];
     const parentElement = element.parentElement;
     if (parentElement) {
-        const siblings = Array
-            .from(parentElement.children)
-            .filter((element) => element.tagName.toLowerCase() === tag);
+        const siblings = Array.from(parentElement.children).filter((element) => element.tagName.toLowerCase() === tag);
         const elementIndex = siblings.indexOf(element);
         if (elementIndex > -1) {
-            return [`${tag}:nth-of-type(${elementIndex + 1})`];
+            return [
+                `${tag}:nth-of-type(${elementIndex + 1})`,
+            ];
         }
     }
     return [];
@@ -8774,7 +8862,7 @@ function getTagSelector(elements) {
     const selectors = [
         ...new Set((0,_utilities_data_js__WEBPACK_IMPORTED_MODULE_1__.flattenArray)(elements.map(getElementTagSelectors))),
     ];
-    return (selectors.length === 0 || selectors.length > 1) ? [] : [selectors[0]];
+    return selectors.length === 0 || selectors.length > 1 ? [] : [selectors[0]];
 }
 //# sourceMappingURL=selector-tag.js.map
 
@@ -8789,24 +8877,22 @@ function getTagSelector(elements) {
 "use strict";
 __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
-/* harmony export */   CssSelectorType: () => (/* binding */ CssSelectorType),
+/* harmony export */   CSS_SELECTOR_TYPE: () => (/* binding */ CSS_SELECTOR_TYPE),
 /* harmony export */   OPERATOR: () => (/* binding */ OPERATOR)
 /* harmony export */ });
-var OPERATOR;
-(function (OPERATOR) {
-    OPERATOR["NONE"] = "none";
-    OPERATOR["DESCENDANT"] = "descendant";
-    OPERATOR["CHILD"] = "child";
-})(OPERATOR || (OPERATOR = {}));
-var CssSelectorType;
-(function (CssSelectorType) {
-    CssSelectorType["id"] = "id";
-    CssSelectorType["class"] = "class";
-    CssSelectorType["tag"] = "tag";
-    CssSelectorType["attribute"] = "attribute";
-    CssSelectorType["nthchild"] = "nthchild";
-    CssSelectorType["nthoftype"] = "nthoftype";
-})(CssSelectorType || (CssSelectorType = {}));
+const OPERATOR = {
+    NONE: "",
+    DESCENDANT: " ",
+    CHILD: " > ",
+};
+const CSS_SELECTOR_TYPE = {
+    id: "id",
+    class: "class",
+    tag: "tag",
+    attribute: "attribute",
+    nthchild: "nthchild",
+    nthoftype: "nthoftype",
+};
 //# sourceMappingURL=types.js.map
 
 /***/ }),
@@ -8827,14 +8913,13 @@ __webpack_require__.r(__webpack_exports__);
  */
 function getCartesianProduct(input = {}) {
     let result = [];
-    Object.entries(input)
-        .forEach(([key, values]) => {
-        result = values.flatMap(value => {
+    Object.entries(input).forEach(([key, values]) => {
+        result = values.flatMap((value) => {
             if (result.length === 0) {
                 return [{ [key]: value }];
             }
             else {
-                return result.map(memo => (Object.assign(Object.assign({}, memo), { [key]: value })));
+                return result.map((memo) => (Object.assign(Object.assign({}, memo), { [key]: value })));
             }
         });
     });
@@ -8870,7 +8955,7 @@ function getIntersection(items = []) {
     if (otherItems.length === 0) {
         return firstItem;
     }
-    return (otherItems).reduce((accumulator, currentValue) => {
+    return otherItems.reduce((accumulator, currentValue) => {
         return accumulator.filter((item) => currentValue.includes(item));
     }, firstItem);
 }
@@ -8884,11 +8969,11 @@ function flattenArray(input) {
  * Convert string that can contain wildcards (asterisks) to RegExp source.
  */
 function wildcardToRegExp(input) {
-    return input
+    return (input
         // convert all special characters used by RegExp, except an asterisk
-        .replace(/[|\\{}()[\]^$+?.]/g, '\\$&')
+        .replace(/[|\\{}()[\]^$+?.]/g, "\\$&")
         // convert asterisk to pattern that matches anything
-        .replace(/\*/g, '.+');
+        .replace(/\*/g, ".+"));
 }
 /**
  * Creates function that will test list of provided matchers against input.
@@ -8899,23 +8984,23 @@ function createPatternMatcher(list) {
         if ((0,_utilities_options_js__WEBPACK_IMPORTED_MODULE_0__.isRegExp)(item)) {
             return (input) => item.test(input);
         }
-        if (typeof item === 'function') {
+        if (typeof item === "function") {
             return (input) => {
                 const result = item(input);
-                if (typeof result !== 'boolean') {
+                if (typeof result !== "boolean") {
                     // eslint-disable-next-line max-len
-                    (0,_utilities_messages_js__WEBPACK_IMPORTED_MODULE_1__.showWarning)('pattern matcher function invalid', 'Provided pattern matching function does not return boolean. It\'s result will be ignored.', item);
+                    (0,_utilities_messages_js__WEBPACK_IMPORTED_MODULE_1__.showWarning)("pattern matcher function invalid", "Provided pattern matching function does not return boolean. It's result will be ignored.", item);
                     return false;
                 }
                 return result;
             };
         }
-        if (typeof item === 'string') {
-            const re = new RegExp('^' + wildcardToRegExp(item) + '$');
+        if (typeof item === "string") {
+            const re = new RegExp("^" + wildcardToRegExp(item) + "$");
             return (input) => re.test(input);
         }
         // eslint-disable-next-line max-len
-        (0,_utilities_messages_js__WEBPACK_IMPORTED_MODULE_1__.showWarning)('pattern matcher invalid', 'Pattern matching only accepts strings, regular expressions and/or functions. This item is invalid and will be ignored.', item);
+        (0,_utilities_messages_js__WEBPACK_IMPORTED_MODULE_1__.showWarning)("pattern matcher invalid", "Pattern matching only accepts strings, regular expressions and/or functions. This item is invalid and will be ignored.", item);
         return () => false;
     });
     return (input) => matchFunctions.some((matchFunction) => matchFunction(input));
@@ -8949,17 +9034,15 @@ __webpack_require__.r(__webpack_exports__);
  * Check whether element is matched uniquely by selector.
  */
 function testSelector(elements, selector, root) {
-    const result = Array.from((0,_utilities_options_js__WEBPACK_IMPORTED_MODULE_2__.sanitizeRoot)(root, elements[0])
-        .querySelectorAll(selector));
-    return (result.length === elements.length
-        && elements.every((element) => result.includes(element)));
+    const result = Array.from((0,_utilities_options_js__WEBPACK_IMPORTED_MODULE_2__.sanitizeRoot)(root, elements[0]).querySelectorAll(selector));
+    return (result.length === elements.length &&
+        elements.every((element) => result.includes(element)));
 }
 /**
  * Test whether selector targets element. It does not have to be a unique match.
  */
 function testMultiSelector(element, selector, root) {
-    const result = Array.from((0,_utilities_options_js__WEBPACK_IMPORTED_MODULE_2__.sanitizeRoot)(root, element)
-        .querySelectorAll(selector));
+    const result = Array.from((0,_utilities_options_js__WEBPACK_IMPORTED_MODULE_2__.sanitizeRoot)(root, element).querySelectorAll(selector));
     return result.includes(element);
 }
 /**
@@ -8985,7 +9068,7 @@ function getParents(elements, root) {
  * Returns root node for given element. This needs to be used because of document-less environments, e.g. jsdom.
  */
 function getRootNode(element) {
-    return element.ownerDocument.querySelector(':root');
+    return element.ownerDocument.querySelector(":root");
 }
 //# sourceMappingURL=utilities-dom.js.map
 
@@ -9025,25 +9108,25 @@ function createElementSelectorData(selector) {
 function createElementData(element, selectorTypes, operator = _types_js__WEBPACK_IMPORTED_MODULE_0__.OPERATOR.NONE) {
     const selectors = {};
     selectorTypes.forEach((selectorType) => {
-        Reflect.set(selectors, selectorType, (0,_utilities_selectors_js__WEBPACK_IMPORTED_MODULE_2__.getElementSelectorsByType)(element, selectorType)
-            .map(createElementSelectorData));
+        Reflect.set(selectors, selectorType, (0,_utilities_selectors_js__WEBPACK_IMPORTED_MODULE_2__.getElementSelectorsByType)(element, selectorType).map(createElementSelectorData));
     });
     return {
         element,
-        operator: _constants_js__WEBPACK_IMPORTED_MODULE_1__.OPERATOR_DATA[operator],
+        operator,
         selectors,
     };
 }
 /**
  * Constructs selector from element data.
  */
-function constructElementSelector({ selectors, operator }) {
+function constructElementSelector({ selectors, operator, }) {
     let pattern = [..._constants_js__WEBPACK_IMPORTED_MODULE_1__.SELECTOR_PATTERN];
     // `nthoftype` already contains tag
-    if (selectors[_types_js__WEBPACK_IMPORTED_MODULE_0__.CssSelectorType.tag] && selectors[_types_js__WEBPACK_IMPORTED_MODULE_0__.CssSelectorType.nthoftype]) {
-        pattern = pattern.filter((item) => item !== _types_js__WEBPACK_IMPORTED_MODULE_0__.CssSelectorType.tag);
+    if (selectors[_types_js__WEBPACK_IMPORTED_MODULE_0__.CSS_SELECTOR_TYPE.tag] &&
+        selectors[_types_js__WEBPACK_IMPORTED_MODULE_0__.CSS_SELECTOR_TYPE.nthoftype]) {
+        pattern = pattern.filter((item) => item !== _types_js__WEBPACK_IMPORTED_MODULE_0__.CSS_SELECTOR_TYPE.tag);
     }
-    let selector = '';
+    let selector = "";
     pattern.forEach((selectorType) => {
         const selectorsOfType = selectors[selectorType] || [];
         selectorsOfType.forEach(({ value, include }) => {
@@ -9052,7 +9135,7 @@ function constructElementSelector({ selectors, operator }) {
             }
         });
     });
-    return (operator.value + selector);
+    return (operator + selector);
 }
 //# sourceMappingURL=utilities-element-data.js.map
 
@@ -9090,11 +9173,11 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
 /* harmony export */   showWarning: () => (/* binding */ showWarning)
 /* harmony export */ });
-const libraryName = 'CssSelectorGenerator';
+const libraryName = "CssSelectorGenerator";
 /**
  * Convenient wrapper for `console.warn` using consistent formatting.
  */
-function showWarning(id = 'unknown problem', ...args) {
+function showWarning(id = "unknown problem", ...args) {
     // eslint-disable-next-line no-console
     console.warn(`${libraryName}: ${id}`, ...args);
 }
@@ -9130,10 +9213,10 @@ __webpack_require__.r(__webpack_exports__);
 
 const DEFAULT_OPTIONS = {
     selectors: [
-        _types_js__WEBPACK_IMPORTED_MODULE_0__.CssSelectorType.id,
-        _types_js__WEBPACK_IMPORTED_MODULE_0__.CssSelectorType.class,
-        _types_js__WEBPACK_IMPORTED_MODULE_0__.CssSelectorType.tag,
-        _types_js__WEBPACK_IMPORTED_MODULE_0__.CssSelectorType.attribute,
+        _types_js__WEBPACK_IMPORTED_MODULE_0__.CSS_SELECTOR_TYPE.id,
+        _types_js__WEBPACK_IMPORTED_MODULE_0__.CSS_SELECTOR_TYPE.class,
+        _types_js__WEBPACK_IMPORTED_MODULE_0__.CSS_SELECTOR_TYPE.tag,
+        _types_js__WEBPACK_IMPORTED_MODULE_0__.CSS_SELECTOR_TYPE.attribute,
     ],
     // if set to true, always include tag name
     includeTag: false,
@@ -9153,7 +9236,7 @@ function sanitizeSelectorTypes(input) {
     if (!Array.isArray(input)) {
         return [];
     }
-    return input.filter((item) => (0,_utilities_typescript_js__WEBPACK_IMPORTED_MODULE_1__.isEnumValue)(_types_js__WEBPACK_IMPORTED_MODULE_0__.CssSelectorType, item));
+    return input.filter((item) => (0,_utilities_typescript_js__WEBPACK_IMPORTED_MODULE_1__.isEnumValue)(_types_js__WEBPACK_IMPORTED_MODULE_0__.CSS_SELECTOR_TYPE, item));
 }
 /**
  * Checks whether provided value is of type RegExp.
@@ -9166,7 +9249,7 @@ function isRegExp(input) {
  * @param input
  */
 function isCssSelectorMatch(input) {
-    return ['string', 'function'].includes(typeof input) || isRegExp(input);
+    return ["string", "function"].includes(typeof input) || isRegExp(input);
 }
 /**
  * Converts input to a list of valid values for whitelist or blacklist.
@@ -9187,12 +9270,12 @@ function isNode(input) {
  * Checks whether provided value is valid ParentNode.
  */
 function isParentNode(input) {
-    const validNodeTypes = [
+    const validParentNodeTypes = [
         Node.DOCUMENT_NODE,
         Node.DOCUMENT_FRAGMENT_NODE,
         Node.ELEMENT_NODE,
     ];
-    return isNode(input) && validNodeTypes.includes(input.nodeType);
+    return isNode(input) && validParentNodeTypes.includes(input.nodeType);
 }
 /**
  * Makes sure that the root node in options is valid.
@@ -9201,7 +9284,7 @@ function sanitizeRoot(input, element) {
     if (isParentNode(input)) {
         if (!input.contains(element)) {
             // eslint-disable-next-line max-len
-            (0,_utilities_messages_js__WEBPACK_IMPORTED_MODULE_2__.showWarning)('element root mismatch', 'Provided root does not contain the element. This will most likely result in producing a fallback selector using element\'s real root node. If you plan to use the selector using provided root (e.g. `root.querySelector`), it will nto work as intended.');
+            (0,_utilities_messages_js__WEBPACK_IMPORTED_MODULE_2__.showWarning)("element root mismatch", "Provided root does not contain the element. This will most likely result in producing a fallback selector using element's real root node. If you plan to use the selector using provided root (e.g. `root.querySelector`), it will nto work as intended.");
         }
         return input;
     }
@@ -9209,18 +9292,18 @@ function sanitizeRoot(input, element) {
     if (isParentNode(rootNode)) {
         if (rootNode !== document) {
             // eslint-disable-next-line max-len
-            (0,_utilities_messages_js__WEBPACK_IMPORTED_MODULE_2__.showWarning)('shadow root inferred', 'You did not provide a root and the element is a child of Shadow DOM. This will produce a selector using ShadowRoot as a root. If you plan to use the selector using document as a root (e.g. `document.querySelector`), it will not work as intended.');
+            (0,_utilities_messages_js__WEBPACK_IMPORTED_MODULE_2__.showWarning)("shadow root inferred", "You did not provide a root and the element is a child of Shadow DOM. This will produce a selector using ShadowRoot as a root. If you plan to use the selector using document as a root (e.g. `document.querySelector`), it will not work as intended.");
         }
         return rootNode;
     }
-    return element.ownerDocument.querySelector(':root');
+    return element.ownerDocument.querySelector(":root");
 }
 /**
  * Makes sure that the output is a number, usable as `maxResults` option in
  * powerset generator.
  */
 function sanitizeMaxNumber(input) {
-    return typeof input === 'number' ? input : Number.POSITIVE_INFINITY;
+    return typeof input === "number" ? input : Number.POSITIVE_INFINITY;
 }
 /**
  * Makes sure the options object contains all required keys.
@@ -9252,21 +9335,24 @@ function sanitizeOptions(element, custom_options = {}) {
 "use strict";
 __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
-/* harmony export */   getPowerSet: () => (/* binding */ getPowerSet)
+/* harmony export */   getPowerSet: () => (/* binding */ getPowerSet),
+/* harmony export */   powerSetGenerator: () => (/* binding */ powerSetGenerator)
 /* harmony export */ });
+function* powerSetGenerator(input = [], { maxResults = Number.POSITIVE_INFINITY } = {}) {
+    let resultCounter = 0;
+    let offsets = generateOffsets(1);
+    while (offsets.length <= input.length && resultCounter < maxResults) {
+        resultCounter += 1;
+        const result = offsets.map((offset) => input[offset]);
+        yield result;
+        offsets = bumpOffsets(offsets, input.length - 1);
+    }
+}
 /**
  * Generates power set of input items.
  */
 function getPowerSet(input = [], { maxResults = Number.POSITIVE_INFINITY } = {}) {
-    const result = [];
-    let resultCounter = 0;
-    let offsets = generateOffsets(1);
-    while ((offsets.length <= input.length) && (resultCounter < maxResults)) {
-        resultCounter += 1;
-        result.push(offsets.map((offset) => input[offset]));
-        offsets = bumpOffsets(offsets, input.length - 1);
-    }
-    return result;
+    return Array.from(powerSetGenerator(input, { maxResults }));
 }
 /**
  * Helper function used by `getPowerSet`. Updates internal pointers.
@@ -9361,17 +9447,14 @@ __webpack_require__.r(__webpack_exports__);
 
 
 
-const ESCAPED_COLON = ':'
-    .charCodeAt(0)
-    .toString(16)
-    .toUpperCase();
+const ESCAPED_COLON = ":".charCodeAt(0).toString(16).toUpperCase();
 // Square brackets need to be escaped, but eslint has a problem with that.
 /* eslint-disable-next-line no-useless-escape */
 const SPECIAL_CHARACTERS_RE = /[ !"#$%&'()\[\]{|}<>*+,./;=?@^`~\\]/;
 /**
  * Escapes special characters used by CSS selector items.
  */
-function sanitizeSelectorItem(input = '') {
+function sanitizeSelectorItem(input = "") {
     var _a, _b;
     return (_b = (_a = CSS === null || CSS === void 0 ? void 0 : CSS.escape) === null || _a === void 0 ? void 0 : _a.call(CSS, input)) !== null && _b !== void 0 ? _b : legacySanitizeSelectorItem(input);
 }
@@ -9380,19 +9463,19 @@ function sanitizeSelectorItem(input = '') {
  * probably be replaced by a polyfill:
  * https://github.com/mathiasbynens/CSS.escape
  */
-function legacySanitizeSelectorItem(input = '') {
-    return input.split('')
+function legacySanitizeSelectorItem(input = "") {
+    return input
+        .split("")
         .map((character) => {
-        if (character === ':') {
+        if (character === ":") {
             return `\\${ESCAPED_COLON} `;
         }
         if (SPECIAL_CHARACTERS_RE.test(character)) {
             return `\\${character}`;
         }
-        return escape(character)
-            .replace(/%/g, '\\');
+        return escape(character).replace(/%/g, "\\");
     })
-        .join('');
+        .join("");
 }
 const SELECTOR_TYPE_GETTERS = {
     tag: _selector_tag_js__WEBPACK_IMPORTED_MODULE_6__.getTagSelector,
@@ -9421,15 +9504,14 @@ function getElementSelectorsByType(element, selectorType) {
  */
 function getSelectorsByType(elements, selector_type) {
     var _a;
-    const getter = ((_a = SELECTOR_TYPE_GETTERS[selector_type]) !== null && _a !== void 0 ? _a : (() => []));
+    const getter = (_a = SELECTOR_TYPE_GETTERS[selector_type]) !== null && _a !== void 0 ? _a : (() => []);
     return getter(elements);
 }
 /**
  * Remove blacklisted selectors from list.
  */
 function filterSelectors(list = [], matchBlacklist, matchWhitelist) {
-    return list.filter((item) => (matchWhitelist(item)
-        || !matchBlacklist(item)));
+    return list.filter((item) => matchWhitelist(item) || !matchBlacklist(item));
 }
 /**
  * Prioritise whitelisted selectors in list.
@@ -9460,7 +9542,7 @@ function getAllSelectors(elements, root, options) {
  * Creates object containing all selector types and their potential values.
  */
 function getSelectorsList(elements, options) {
-    const { blacklist, whitelist, combineWithinSelector, maxCombinations, } = options;
+    const { blacklist, whitelist, combineWithinSelector, maxCombinations } = options;
     const matchBlacklist = (0,_utilities_data_js__WEBPACK_IMPORTED_MODULE_7__.createPatternMatcher)(blacklist);
     const matchWhitelist = (0,_utilities_data_js__WEBPACK_IMPORTED_MODULE_7__.createPatternMatcher)(whitelist);
     const reducer = (data, selector_type) => {
@@ -9472,17 +9554,16 @@ function getSelectorsList(elements, options) {
             : found_selectors.map((item) => [item]);
         return data;
     };
-    return getSelectorsToGet(options)
-        .reduce(reducer, {});
+    return getSelectorsToGet(options).reduce(reducer, {});
 }
 /**
  * Creates list of selector types that we will need to generate the selector.
  */
 function getSelectorsToGet(options) {
-    const { selectors, includeTag, } = options;
+    const { selectors, includeTag } = options;
     const selectors_to_get = [].concat(selectors);
-    if (includeTag && !selectors_to_get.includes('tag')) {
-        selectors_to_get.push('tag');
+    if (includeTag && !selectors_to_get.includes("tag")) {
+        selectors_to_get.push("tag");
     }
     return selectors_to_get;
 }
@@ -9492,22 +9573,20 @@ function getSelectorsToGet(options) {
  * TAG part.
  */
 function addTagTypeIfNeeded(list) {
-    return (list.includes(_types_js__WEBPACK_IMPORTED_MODULE_9__.CssSelectorType.tag)
-        || list.includes(_types_js__WEBPACK_IMPORTED_MODULE_9__.CssSelectorType.nthoftype))
+    return list.includes(_types_js__WEBPACK_IMPORTED_MODULE_9__.CSS_SELECTOR_TYPE.tag) ||
+        list.includes(_types_js__WEBPACK_IMPORTED_MODULE_9__.CSS_SELECTOR_TYPE.nthoftype)
         ? [...list]
-        : [...list, _types_js__WEBPACK_IMPORTED_MODULE_9__.CssSelectorType.tag];
+        : [...list, _types_js__WEBPACK_IMPORTED_MODULE_9__.CSS_SELECTOR_TYPE.tag];
 }
 /**
  * Generates list of possible selector type combinations.
  */
 function combineSelectorTypes(options) {
-    const { selectors, combineBetweenSelectors, includeTag, maxCandidates, } = options;
+    const { selectors, combineBetweenSelectors, includeTag, maxCandidates } = options;
     const combinations = combineBetweenSelectors
         ? (0,_utilities_powerset_js__WEBPACK_IMPORTED_MODULE_11__.getPowerSet)(selectors, { maxResults: maxCandidates })
-        : selectors.map(item => [item]);
-    return includeTag
-        ? combinations.map(addTagTypeIfNeeded)
-        : combinations;
+        : selectors.map((item) => [item]);
+    return includeTag ? combinations.map(addTagTypeIfNeeded) : combinations;
 }
 /**
  * Generates list of combined CSS selectors.
@@ -9537,9 +9616,9 @@ function constructSelectors(selector_types, selectors_by_type) {
  * Creates selector for given selector type. Combines several parts if needed.
  */
 function constructSelectorType(selector_type, selectors_data) {
-    return (selectors_data[selector_type])
-        ? selectors_data[selector_type].join('')
-        : '';
+    return selectors_data[selector_type]
+        ? selectors_data[selector_type].join("")
+        : "";
 }
 /**
  * Converts selector data object to a selector.
@@ -9547,13 +9626,13 @@ function constructSelectorType(selector_type, selectors_data) {
 function constructSelector(selectorData = {}) {
     const pattern = [..._constants_js__WEBPACK_IMPORTED_MODULE_0__.SELECTOR_PATTERN];
     // selector "nthoftype" already contains "tag"
-    if (selectorData[_types_js__WEBPACK_IMPORTED_MODULE_9__.CssSelectorType.tag]
-        && selectorData[_types_js__WEBPACK_IMPORTED_MODULE_9__.CssSelectorType.nthoftype]) {
-        pattern.splice(pattern.indexOf(_types_js__WEBPACK_IMPORTED_MODULE_9__.CssSelectorType.tag), 1);
+    if (selectorData[_types_js__WEBPACK_IMPORTED_MODULE_9__.CSS_SELECTOR_TYPE.tag] &&
+        selectorData[_types_js__WEBPACK_IMPORTED_MODULE_9__.CSS_SELECTOR_TYPE.nthoftype]) {
+        pattern.splice(pattern.indexOf(_types_js__WEBPACK_IMPORTED_MODULE_9__.CSS_SELECTOR_TYPE.tag), 1);
     }
     return pattern
         .map((type) => constructSelectorType(type, selectorData))
-        .join('');
+        .join("");
 }
 /**
  * Generates combinations of child and descendant selectors within root
@@ -9561,8 +9640,8 @@ function constructSelector(selectorData = {}) {
  */
 function generateCandidateCombinations(selectors, rootSelector) {
     return [
-        ...selectors.map((selector) => rootSelector + _constants_js__WEBPACK_IMPORTED_MODULE_0__.CHILD_OPERATOR + selector),
-        ...selectors.map((selector) => rootSelector + _constants_js__WEBPACK_IMPORTED_MODULE_0__.DESCENDANT_OPERATOR + selector),
+        ...selectors.map((selector) => rootSelector + _types_js__WEBPACK_IMPORTED_MODULE_9__.OPERATOR.DESCENDANT + selector),
+        ...selectors.map((selector) => rootSelector + _types_js__WEBPACK_IMPORTED_MODULE_9__.OPERATOR.CHILD + selector),
     ];
 }
 /**
@@ -9570,14 +9649,14 @@ function generateCandidateCombinations(selectors, rootSelector) {
  * element.
  */
 function generateCandidates(selectors, rootSelector) {
-    return rootSelector === ''
+    return rootSelector === ""
         ? selectors
         : generateCandidateCombinations(selectors, rootSelector);
 }
 /**
  * Tries to find an unique CSS selector for element within given parent.
  */
-function getSelectorWithinRoot(elements, root, rootSelector = '', options) {
+function getSelectorWithinRoot(elements, root, rootSelector = "", options) {
     const elementSelectors = getAllSelectors(elements, options.root, options);
     const selectorCandidates = generateCandidates(elementSelectors, rootSelector);
     for (const candidateSelector of selectorCandidates) {
@@ -9591,14 +9670,13 @@ function getSelectorWithinRoot(elements, root, rootSelector = '', options) {
  * Climbs through parents of the element and tries to find the one that is
  * identifiable by unique CSS selector.
  */
-function getClosestIdentifiableParent(elements, root, rootSelector = '', options) {
+function getClosestIdentifiableParent(elements, root, rootSelector = "", options) {
     if (elements.length === 0) {
         return null;
     }
     const candidatesList = [
-        (elements.length > 1) ? elements : [],
-        ...(0,_utilities_dom_js__WEBPACK_IMPORTED_MODULE_8__.getParents)(elements, root)
-            .map((element) => [element]),
+        elements.length > 1 ? elements : [],
+        ...(0,_utilities_dom_js__WEBPACK_IMPORTED_MODULE_8__.getParents)(elements, root).map((element) => [element]),
     ];
     for (const currentElements of candidatesList) {
         const result = getSelectorWithinRoot(currentElements, root, rootSelector, options);
@@ -9615,6 +9693,9 @@ function getClosestIdentifiableParent(elements, root, rootSelector = '', options
  * Converts input into list of elements, removing duplicates and non-elements.
  */
 function sanitizeSelectorNeedle(needle) {
+    if (needle instanceof NodeList || needle instanceof HTMLCollection) {
+        needle = Array.from(needle);
+    }
     const elements = (Array.isArray(needle) ? needle : [needle]).filter(_utilities_iselement_js__WEBPACK_IMPORTED_MODULE_10__.isElement);
     return [...new Set(elements)];
 }
@@ -9637,8 +9718,7 @@ __webpack_require__.r(__webpack_exports__);
  * Checks whether value is one of the enum's values.
  */
 function isEnumValue(haystack, needle) {
-    return Object.values(haystack)
-        .includes(needle);
+    return Object.values(haystack).includes(needle);
 }
 //# sourceMappingURL=utilities-typescript.js.map
 
