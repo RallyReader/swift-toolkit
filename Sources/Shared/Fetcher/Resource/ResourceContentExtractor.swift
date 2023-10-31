@@ -12,7 +12,7 @@ import SwiftSoup
 /// **WARNING:** This API is experimental and may change or be removed in a future release without
 /// notice. Use with caution.
 public protocol _ResourceContentExtractor {
-    
+
     /// Extracts the text content of the given `resource`.
     func extractText(of resource: Resource) -> ResourceResult<String>
 }
@@ -26,7 +26,7 @@ public extension _ResourceContentExtractor {
 /// **WARNING:** This API is experimental and may change or be removed in a future release without
 /// notice. Use with caution.
 public protocol _ResourceContentExtractorFactory {
-    
+
     /// Creates a `ResourceContentExtractor` instance for the given `resource`.
     /// Returns null if the resource format is not supported.
     func makeExtractor(for resource: Resource) -> _ResourceContentExtractor?
@@ -35,9 +35,9 @@ public protocol _ResourceContentExtractorFactory {
 /// **WARNING:** This API is experimental and may change or be removed in a future release without
 /// notice. Use with caution.
 public class _DefaultResourceContentExtractorFactory: _ResourceContentExtractorFactory {
-    
+
     public init() {}
-    
+
     public func makeExtractor(for resource: Resource) -> _ResourceContentExtractor? {
         switch resource.link.mediaType {
         case .html, .xhtml:
@@ -53,9 +53,9 @@ public class _DefaultResourceContentExtractorFactory: _ResourceContentExtractorF
 /// **WARNING:** This API is experimental and may change or be removed in a future release without
 /// notice. Use with caution.
 class _HTMLResourceContentExtractor: _ResourceContentExtractor {
-    
+
     private let xmlFactory = DefaultXMLDocumentFactory()
-    
+
     func extractText(of resource: Resource) -> ResourceResult<String> {
         resource.readAsString()
             .flatMap { content in
@@ -63,16 +63,20 @@ class _HTMLResourceContentExtractor: _ResourceContentExtractor {
                     // Fuzi strips the HTML entities away when parsing the XML structure (we're missing characters like " ' etc)
                     // Getting the unescaped content before parsing it seems to solve the issue
                     
+                    print("content before unescaping: \(content)")
+                    
                     // Transform HTML entities into their actual characters.
-                    let unescapedContent = try Entities.unescape(content)
+                    let unescapedContent = try Entities.unescape(content.replacingOccurrences(of: "<br/>", with: "br2n"))
                     
                     // First try to parse a valid XML document, then fallback on SwiftSoup, which is slower.
                     let text = parse(xml: unescapedContent)
-                    ?? parse(html: unescapedContent)
-                    ?? ""
+                        ?? parse(html: unescapedContent)
+                        ?? ""
                     
-                    return .success(text)
+                    print("unescaped text: \(text)")
                     
+                    return .success(text.replacingOccurrences(of: "br2n", with: "\n"))
+
                 } catch {
                     return .failure(.wrap(error))
                 }
@@ -85,8 +89,8 @@ class _HTMLResourceContentExtractor: _ResourceContentExtractor {
     // invalid HTML documents.
     private func parse(xml: String) -> String? {
         guard let document = try? xmlFactory.open(string: xml, namespaces: [
-            XMLNamespace(prefix: "xhtml", uri: "http://www.w3.org/1999/xhtml")
-        ])
+                XMLNamespace(prefix: "xhtml", uri: "http://www.w3.org/1999/xhtml")
+            ])
         else {
             return nil
         }
@@ -98,6 +102,6 @@ class _HTMLResourceContentExtractor: _ResourceContentExtractor {
     //
     // This may be slow but will recover from broken HTML documents.
     private func parse(html: String) -> String? {
-        try? SwiftSoup.parse(html).body()?.text()
+        return try? SwiftSoup.parse(html).body()?.text()
     }
 }
