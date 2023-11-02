@@ -37,7 +37,7 @@ public protocol DecorableNavigator {
     ///
     /// This does not refresh the existing list from the specified `group`
     /// It is used to append decorations with the same efficiency even when the group gets big
-    func addDecorations(decorations: [Decoration], in group: String)
+    func addDecorations(decorations: [Decoration], in group: String, completion: @escaping () -> Void)
 }
 
 /// Holds the metadata about a decoration activation interaction.
