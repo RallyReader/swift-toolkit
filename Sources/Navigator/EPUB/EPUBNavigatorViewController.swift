@@ -852,7 +852,7 @@ open class EPUBNavigatorViewController: UIViewController,
         }
     }
     
-    public func addDecorations(decorations: [Decoration], in group: String) {
+    public func addDecorations(decorations: [Decoration], in group: String, completion: @escaping () -> Void) {
         let date = Date()
         let source = self.decorations[group] ?? []
         let target = decorations.map { DiffableDecoration(decoration: $0) }
@@ -863,13 +863,12 @@ open class EPUBNavigatorViewController: UIViewController,
         
         if let script = decorationChanges.javascript(forGroup: group, styles: config.decorationTemplates) {
             self.loadedSpreadView(forHREF: decorations[0].locator.href)?.evaluateScript(script, inHREF: decorations[0].locator.href) { _ in
-                print("DECORATIONS :: time to apply decorations 2 \(-date.timeIntervalSinceNow) group: \(group)")
+                completion()
             }
+        } else {
+            completion()
         }
-        
-        print("DECORATIONS :: time to apply decorations \(-date.timeIntervalSinceNow) group: \(group)")
     }
-
 
     public func observeDecorationInteractions(inGroup group: String, onActivated: OnActivatedCallback?) {
         guard let onActivated = onActivated else {
