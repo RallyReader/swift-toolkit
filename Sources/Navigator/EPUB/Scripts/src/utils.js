@@ -8,6 +8,45 @@
 
 import { TextQuoteAnchor } from "./vendor/hypothesis/anchoring/types";
 import { getCurrentSelection } from "./selection";
+import { toNativeRect } from "./rect";
+
+/**
+ * Least Recently Used Cache with a limit wraping a Map object
+ * The LRUCache constructor takes a limit argument which specifies the maximum number of items the cache can hold.
+ * The get method removes and re-adds an item to ensure it's marked as the most recently used.
+ * The set method checks the size of the cache, and removes the least recently used item if necessary before adding the new item.
+ * The clear method clears the cache.
+ */
+class LRUCache {
+  constructor(limit = 100) {
+    // Default limit of 100 items
+    this.limit = limit;
+    this.map = new Map();
+  }
+
+  get(key) {
+    if (!this.map.has(key)) return undefined;
+
+    // Remove and re-add to ensure this item is the most recently used
+    const value = this.map.get(key);
+    this.map.delete(key);
+    this.map.set(key, value);
+    return value;
+  }
+
+  set(key, value) {
+    if (this.map.size >= this.limit) {
+      // Remove the least recently used item
+      const firstKey = this.map.keys().next().value;
+      this.map.delete(firstKey);
+    }
+    this.map.set(key, value);
+  }
+
+  clear() {
+    this.map.clear();
+  }
+}
 
 window.addEventListener(
   "error",
@@ -131,11 +170,11 @@ export function getColumnCountPerScreen() {
 }
 
 export function isScrollModeEnabled() {
+  const style = document.documentElement.style;
   return (
-    document.documentElement.style
-      .getPropertyValue("--USER__scroll")
-      .toString()
-      .trim() === "readium-scroll-on"
+    style.getPropertyValue("--USER__view").trim() == "readium-scroll-on" ||
+    // FIXME: Will need to be removed in Readium 3.0, --USER__scroll was incorrect.
+    style.getPropertyValue("--USER__scroll").trim() == "readium-scroll-on"
   );
 }
 
@@ -182,14 +221,22 @@ export function scrollToText(text) {
   return scrollToRange(range);
 }
 
+// Returns the rectangular describing the gicen locator in the device's native coordinates
+export function rectFromLocator(locator) {
+  let range = rangeFromLocator(locator);
+  if (!range) {
+    return null;
+  }
+  return toNativeRect(range.getBoundingClientRect());
+}
+
 function scrollToRange(range) {
   return scrollToRect(range.getBoundingClientRect());
 }
 
 function scrollToRect(rect) {
   if (isScrollModeEnabled()) {
-    document.scrollingElement.scrollTop =
-      rect.top + window.scrollY - window.innerHeight / 2;
+    document.scrollingElement.scrollTop = rect.top + window.scrollY;
   } else {
     document.scrollingElement.scrollLeft = snapOffset(
       rect.left + window.scrollX
@@ -247,38 +294,174 @@ function snapCurrentPosition() {
   document.scrollingElement.scrollLeft = currentOffsetSnapped;
 }
 
-export function rangeFromLocator(locator) {
-  let text = locator.text;
-  if (!text || !text.highlight) {
-    return null;
+// Cache the higher level css elements range for faster calculating the word by word dom ranges
+let elementRangeCache = new LRUCache(10); // Key: cssSelector, Value: entire element range
+
+// Caches the css element range
+function cacheElementRange(cssSelector) {
+  const element = document.querySelector(cssSelector);
+  if (element) {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    elementRangeCache.set(cssSelector, range);
   }
+}
+
+// Returns a range from a locator; it first searches for the higher level css element in the cache
+function rangeFromCachedLocator(locator) {
+  const cssSelector = locator.locations.cssSelector;
+  const entireRange = elementRangeCache.get(cssSelector);
+  if (!entireRange) {
+    cacheElementRange(cssSelector);
+    return rangeFromCachedLocator(locator);
+  }
+
+  const entireText = entireRange.toString();
+  let startIndex = 0;
+  let foundIndex = -1;
+
+  while (startIndex < entireText.length) {
+    const highlightIndex = entireText.indexOf(
+      locator.text.highlight,
+      startIndex
+    );
+    if (highlightIndex === -1) {
+      break; // No more occurrences of highlight text
+    }
+
+    const beforeText = locator.text.before
+      ? entireText.slice(
+          Math.max(0, highlightIndex - locator.text.before.length),
+          highlightIndex
+        )
+      : "";
+    const afterText = locator.text.after
+      ? entireText.slice(
+          highlightIndex + locator.text.highlight.length,
+          highlightIndex +
+            locator.text.highlight.length +
+            locator.text.after.length
+        )
+      : "";
+
+    const beforeTextMatches =
+      !locator.text.before || locator.text.before.endsWith(beforeText);
+    const afterTextMatches =
+      !locator.text.after || locator.text.after.startsWith(afterText);
+
+    if (beforeTextMatches && afterTextMatches) {
+      // Highlight text from locator was found
+      foundIndex = highlightIndex;
+      break;
+    }
+
+    // Update startIndex for next iteration to search for next occurrence of highlight text
+    startIndex = highlightIndex + 1;
+  }
+
+  if (foundIndex === -1) {
+    throw new Error("Locator range could not be calculated");
+  }
+
+  const highlightStartIndex = foundIndex;
+  const highlightEndIndex = foundIndex + locator.text.highlight.length;
+
+  const subRange = document.createRange();
+  let count = 0;
+  let node;
+  const nodeIterator = document.createNodeIterator(
+    entireRange.commonAncestorContainer, // This should be a Document or DocumentFragment node
+    NodeFilter.SHOW_TEXT
+  );
+
+  for (node = nodeIterator.nextNode(); node; node = nodeIterator.nextNode()) {
+    const nodeEndIndex = count + node.nodeValue.length;
+    if (nodeEndIndex > startIndex) {
+      break;
+    }
+    count = nodeEndIndex;
+  }
+
+  subRange.setStart(node, highlightStartIndex - count);
+  subRange.setEnd(node, highlightEndIndex - count);
+
+  return subRange;
+}
+
+export function rangeFromLocator(locator) {
   try {
-    var root;
     let locations = locator.locations;
-    if (locations && locations.cssSelector) {
-      root = document.querySelector(locations.cssSelector);
+    let text = locator.text;
+    if (text && text.highlight) {
+      var root;
+      if (locations && locations.cssSelector) {
+        try {
+          const range = rangeFromCachedLocator(locator);
+          return range;
+        } catch {
+          root = document.querySelector(locations.cssSelector);
+        }
+      }
+      if (!root) {
+        root = document.body;
+      }
+
+      let anchor = new TextQuoteAnchor(root, text.highlight, {
+        prefix: text.before,
+        suffix: text.after,
+      });
+
+      return anchor.toRange();
     }
-    if (!root) {
-      root = document.body;
+
+    if (locations) {
+      var element = null;
+
+      if (!element && locations.cssSelector) {
+        element = document.querySelector(locations.cssSelector);
+      }
+
+      if (!element && locations.fragments) {
+        for (const htmlId of locations.fragments) {
+          element = document.getElementById(htmlId);
+          if (element) {
+            break;
+          }
+        }
+      }
+
+      if (element) {
+        let range = document.createRange();
+        range.setStartBefore(element);
+        range.setEndAfter(element);
+        return range;
+      }
     }
-    let anchor = new TextQuoteAnchor(root, text.highlight, {
-      prefix: text.before,
-      suffix: text.after,
-    });
-    return anchor.toRange();
   } catch (e) {
     logError(e);
-    return null;
   }
+
+  return null;
 }
 
 /// User Settings.
 
+export function setCSSProperties(properties) {
+  for (const name in properties) {
+    setProperty(name, properties[name]);
+  }
+}
+
 // For setting user setting.
 export function setProperty(key, value) {
-  var root = document.documentElement;
-
-  root.style.setProperty(key, value);
+  if (value === null) {
+    removeProperty(key);
+  } else {
+    var root = document.documentElement;
+    // The `!important` annotation is added with `setProperty()` because if
+    // it's part of the `value`, it will be ignored by the Web View.
+    root.style.setProperty(key, value, "important");
+  }
 }
 
 // For removing user setting.
