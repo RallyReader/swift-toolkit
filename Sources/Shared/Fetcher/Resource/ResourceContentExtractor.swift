@@ -66,16 +66,16 @@ class _HTMLResourceContentExtractor: _ResourceContentExtractor {
 //                    print("content before unescaping: \(content)")
                     
                     // Transform HTML entities into their actual characters.
-                    let unescapedContent = try Entities.unescape(content.replacingOccurrences(of: "<br/>", with: "br2n"))
+//                    let unescapedContent = try Entities.unescape(content.replacingOccurrences(of: "<br/>", with: "br2n"))
                     
                     // First try to parse a valid XML document, then fallback on SwiftSoup, which is slower.
-                    let text = parse(xml: unescapedContent)
-                        ?? parse(html: unescapedContent)
+                    let text = parse(xml: content)
+                        ?? parse(html: content)
                         ?? ""
                     
 //                    print("unescaped text: \(text)")
-                    
-                    return .success(text.replacingOccurrences(of: "br2n", with: "\n"))
+                    return .success(text)
+//                    return .success(text.replacingOccurrences(of: "br2n", with: "\n"))
 
                 } catch {
                     return .failure(.wrap(error))
