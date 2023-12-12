@@ -784,7 +784,7 @@ open class EPUBNavigatorViewController: UIViewController,
         return go(to: direction, animated: animated, completion: completion)
     }
     
-    public func getRectFromLocator(_ locator: Locator, completion: @escaping (CGRect?) -> Void) {
+    public func getRectFromLocator(_ locator: Locator, convertRect: Bool = true, completion: @escaping (CGRect?) -> Void) {
         guard let locatorJson = locator.jsonString else {
             completion(nil)
             return
@@ -796,8 +796,12 @@ open class EPUBNavigatorViewController: UIViewController,
                 do {
                     let readiumResult = try result.get()
                     if let frame = CGRect(json: readiumResult) {
-                        let finalFrame = spreadView?.convertRectToNavigatorSpace(frame)
-                        completion(finalFrame)
+                        if convertRect == true {
+                            let finalFrame = spreadView?.convertRectToNavigatorSpace(frame)
+                            completion(finalFrame)
+                        } else {
+                            completion(frame)
+                        }
                     }
                 } catch {
                     self.log(.error, error)
