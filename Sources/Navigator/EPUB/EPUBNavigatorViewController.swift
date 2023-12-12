@@ -821,6 +821,11 @@ open class EPUBNavigatorViewController: UIViewController,
         }
         return false
     }
+    
+    public func scrollViewInsideSpreadView(forHREF href: String) -> UIScrollView? {
+        let spreadView = loadedSpreadView(forHREF: href)
+        return spreadView?.scrollView
+    }
 
     // MARK: - SelectableNavigator
 
