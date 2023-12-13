@@ -791,11 +791,13 @@ open class EPUBNavigatorViewController: UIViewController,
         }
         
         let spreadView = loadedSpreadView(forHREF: locator.href)
-        spreadView?.evaluateScript("readium.rectFromLocator(\(locatorJson))", inHREF: locator.href, completion: { result in
+        spreadView?.evaluateScript("readium.clientRectFromLocator(\(locatorJson))", inHREF: locator.href, completion: { result in
             DispatchQueue.main.async {
                 do {
                     let readiumResult = try result.get()
                     if let frame = CGRect(json: readiumResult) {
+                        print("word rect: \(frame)")
+                        
                         if convertRect == true {
                             let finalFrame = spreadView?.convertRectToNavigatorSpace(frame)
                             completion(finalFrame)
@@ -812,6 +814,7 @@ open class EPUBNavigatorViewController: UIViewController,
     }
     
     public func currentSpreadDisplayingLastPage() -> Bool {
+        
         if let spreadView = paginationView.loadedViews[paginationView.currentIndex] as? EPUBSpreadView {
             let offset = spreadView.scrollView.contentOffset.x
             let contentWidth = spreadView.scrollView.contentSize.width
@@ -825,6 +828,12 @@ open class EPUBNavigatorViewController: UIViewController,
     public func scrollViewInsideSpreadView(forHREF href: String) -> UIScrollView? {
         let spreadView = loadedSpreadView(forHREF: href)
         return spreadView?.scrollView
+    }
+    
+    public func allLoadedScrollViews() -> [UIScrollView] {
+        return paginationView.loadedViews.compactMap { _, view in
+            (view as? EPUBSpreadView)?.scrollView
+        }
     }
 
     // MARK: - SelectableNavigator

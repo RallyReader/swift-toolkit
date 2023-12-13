@@ -19,6 +19,7 @@ import {
   setProperty,
   setCSSProperties,
   rectFromLocator,
+  clientRectFromLocator,
 } from "./utils";
 import { getDecorations, registerTemplates } from "./decorator";
 
@@ -34,7 +35,7 @@ global.readium = {
   setProperty: setProperty,
   removeProperty: removeProperty,
   rectFromLocator: rectFromLocator,
-
+  clientRectFromLocator: clientRectFromLocator,
   // decoration
   registerDecorationTemplates: registerTemplates,
   getDecorations: getDecorations,

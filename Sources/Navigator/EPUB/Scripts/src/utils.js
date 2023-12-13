@@ -8,7 +8,7 @@
 
 import { TextQuoteAnchor } from "./vendor/hypothesis/anchoring/types";
 import { getCurrentSelection } from "./selection";
-import { toNativeRect } from "./rect";
+import { getClientRectsNoOverlap, toNativeRect } from "./rect";
 
 /**
  * Least Recently Used Cache with a limit wraping a Map object
@@ -227,6 +227,26 @@ export function rectFromLocator(locator) {
     return null;
   }
   return toNativeRect(range.getBoundingClientRect());
+}
+
+let rectsCache = new LRUCache(10);
+export function clientRectFromLocator(locator) {
+  const key = JSON.stringify(locator);
+  let nativeRect = rectsCache.get(key);
+  if (nativeRect !== undefined) {
+    log("return cached rect");
+    return nativeRect;
+  }
+  let range = rangeFromLocator(locator);
+  if (!range) {
+    return null;
+  }
+  const clientRects = getClientRectsNoOverlap(range, true);
+  const rect = clientRects[0];
+  nativeRect = toNativeRect(rect);
+  rectsCache.set(key, nativeRect);
+
+  return nativeRect;
 }
 
 function scrollToRange(range) {
