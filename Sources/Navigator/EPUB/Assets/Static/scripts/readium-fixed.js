@@ -1782,6 +1782,7 @@ __webpack_require__.g.readium = {
   setProperty: _utils__WEBPACK_IMPORTED_MODULE_3__.setProperty,
   removeProperty: _utils__WEBPACK_IMPORTED_MODULE_3__.removeProperty,
   rectFromLocator: _utils__WEBPACK_IMPORTED_MODULE_3__.rectFromLocator,
+  clientRectFromLocator: _utils__WEBPACK_IMPORTED_MODULE_3__.clientRectFromLocator,
   // decoration
   registerDecorationTemplates: _decorator__WEBPACK_IMPORTED_MODULE_4__.registerTemplates,
   getDecorations: _decorator__WEBPACK_IMPORTED_MODULE_4__.getDecorations,
@@ -2349,6 +2350,7 @@ function log() {
 "use strict";
 __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   clientRectFromLocator: () => (/* binding */ clientRectFromLocator),
 /* harmony export */   getColumnCountPerScreen: () => (/* binding */ getColumnCountPerScreen),
 /* harmony export */   isScrollModeEnabled: () => (/* binding */ isScrollModeEnabled),
 /* harmony export */   log: () => (/* binding */ log),
@@ -2393,7 +2395,6 @@ class LRUCache {
     // Default limit of 100 items
     this.limit = limit;
     this.map = new Map();
-    log("did create LRUCache");
   }
   get(key) {
     if (!this.map.has(key)) return undefined;
@@ -2558,6 +2559,24 @@ function rectFromLocator(locator) {
     return null;
   }
   return (0,_rect__WEBPACK_IMPORTED_MODULE_2__.toNativeRect)(range.getBoundingClientRect());
+}
+let rectsCache = new LRUCache(10);
+function clientRectFromLocator(locator) {
+  const key = JSON.stringify(locator);
+  let nativeRect = rectsCache.get(key);
+  if (nativeRect !== undefined) {
+    log("return cached rect");
+    return nativeRect;
+  }
+  let range = rangeFromLocator(locator);
+  if (!range) {
+    return null;
+  }
+  const clientRects = (0,_rect__WEBPACK_IMPORTED_MODULE_2__.getClientRectsNoOverlap)(range, true);
+  const rect = clientRects[0];
+  nativeRect = (0,_rect__WEBPACK_IMPORTED_MODULE_2__.toNativeRect)(rect);
+  rectsCache.set(key, nativeRect);
+  return nativeRect;
 }
 function scrollToRange(range) {
   return scrollToRect(range.getBoundingClientRect());
