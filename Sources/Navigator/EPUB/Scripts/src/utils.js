@@ -418,7 +418,8 @@ export function rangeFromLocator(locator) {
           const range = rangeFromCachedLocator(locator);
           return range;
         } catch {
-          root = document.querySelector(locations.cssSelector);
+          log("failed getting the range from css selector");
+          // root = document.querySelector(locations.cssSelector);
         }
       }
       if (!root) {
