@@ -2711,9 +2711,11 @@ function rangeFromLocator(locator) {
           const range = rangeFromCachedLocator(locator);
           return range;
         } catch (_unused) {
-          root = document.querySelector(locations.cssSelector);
+          log("failed getting the range from css selector");
+          // root = document.querySelector(locations.cssSelector);
         }
       }
+
       if (!root) {
         root = document.body;
       }
