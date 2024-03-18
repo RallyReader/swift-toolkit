@@ -784,14 +784,15 @@ open class EPUBNavigatorViewController: UIViewController,
         return go(to: direction, animated: animated, completion: completion)
     }
     
-    public func getRectFromLocator(_ locator: Locator, convertRect: Bool = true, completion: @escaping (CGRect?) -> Void) {
+    public func getRectFromLocator(_ locator: Locator, convertRect: Bool = true, reset: Bool = false, completion: @escaping (CGRect?) -> Void) {
         guard let locatorJson = locator.jsonString else {
             completion(nil)
             return
         }
         
         let spreadView = loadedSpreadView(forHREF: locator.href)
-        spreadView?.evaluateScript("readium.clientRectFromLocator(\(locatorJson))", inHREF: locator.href, completion: { result in
+        let script = "readium.clientRectFromLocator(\(locatorJson), \(reset ? 1 : 0))"
+        spreadView?.evaluateScript(script, inHREF: locator.href, completion: { result in
             DispatchQueue.main.async {
                 do {
                     let readiumResult = try result.get()

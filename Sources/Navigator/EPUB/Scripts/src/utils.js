@@ -230,10 +230,10 @@ export function rectFromLocator(locator) {
 }
 
 let rectsCache = new LRUCache(10);
-export function clientRectFromLocator(locator) {
+export function clientRectFromLocator(locator, reset) {
   const key = JSON.stringify(locator);
   let nativeRect = rectsCache.get(key);
-  if (nativeRect !== undefined) {
+  if (nativeRect !== undefined && reset === 0) {
     log("return cached rect");
     return nativeRect;
   }
