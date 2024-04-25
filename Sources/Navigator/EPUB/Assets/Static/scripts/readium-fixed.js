@@ -1783,6 +1783,7 @@ __webpack_require__.g.readium = {
   removeProperty: _utils__WEBPACK_IMPORTED_MODULE_3__.removeProperty,
   rectFromLocator: _utils__WEBPACK_IMPORTED_MODULE_3__.rectFromLocator,
   clientRectFromLocator: _utils__WEBPACK_IMPORTED_MODULE_3__.clientRectFromLocator,
+  calculateHorizontalPageRanges: _utils__WEBPACK_IMPORTED_MODULE_3__.calculateHorizontalPageRanges,
   // decoration
   registerDecorationTemplates: _decorator__WEBPACK_IMPORTED_MODULE_4__.registerTemplates,
   getDecorations: _decorator__WEBPACK_IMPORTED_MODULE_4__.getDecorations,
@@ -2350,6 +2351,7 @@ function log() {
 "use strict";
 __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   calculateHorizontalPageRanges: () => (/* binding */ calculateHorizontalPageRanges),
 /* harmony export */   clientRectFromLocator: () => (/* binding */ clientRectFromLocator),
 /* harmony export */   getColumnCountPerScreen: () => (/* binding */ getColumnCountPerScreen),
 /* harmony export */   isScrollModeEnabled: () => (/* binding */ isScrollModeEnabled),
@@ -2577,6 +2579,83 @@ function clientRectFromLocator(locator, reset) {
   nativeRect = (0,_rect__WEBPACK_IMPORTED_MODULE_2__.toNativeRect)(rect);
   rectsCache.set(key, nativeRect);
   return nativeRect;
+}
+function calculateHorizontalPageRanges() {
+  const rangeData = {};
+  const blockTags = ["html", "head", "frameset", "script", "noscript", "style", "meta", "link", "title", "frame", "noframes", "section", "nav", "aside", "hgroup", "header", "footer", "p", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "pre", "div", "blockquote", "hr", "address", "figure", "figcaption", "form", "fieldset", "ins", "del", "s", "dl", "dt", "dd", "li", "table", "caption", "thead", "tfoot", "tbody", "colgroup", "col", "tr", "th", "td", "canvas", "details", "menu", "plaintext", "template", "article", "main", "svg", "math"];
+  const selectorString = blockTags.join(",") + ",#text"; // Include text nodes.
+  const allElements = document.body.querySelectorAll(selectorString);
+  const elements = Array.from(allElements).filter(el => {
+    // Check that there are no children of the same block tag type
+    const hasNoChildrenOfSameType = !Array.from(el.children).some(child => blockTags.includes(child.tagName.toLowerCase()));
+    // Check that the text content is not just whitespace
+    // const containsText = el.textContent.trim().length > 0;
+    return hasNoChildrenOfSameType; //&& containsText;
+  });
+
+  let currentPage = 0;
+  let pageWidth = window.innerWidth;
+  elements.forEach(element => {
+    let rect = element.getBoundingClientRect();
+    rect.x += window.scrollX;
+    log(element.textContent);
+    log("rect frame element = (" + rect.x + ", " + rect.y + ", " + rect.width + ", " + rect.height + ")");
+    function processElement() {
+      let words = element.textContent.split(" ");
+      let removedWords = [];
+      let removedWord = "";
+      let wordBoundingRect = new DOMRect(Number.MAX_VALUE,
+      // we use the max possible value for 'x' to make sure it enters the 'while' iterator
+      0, 0, 0);
+
+      // Reduce the element text until it fits the page height
+      while (wordBoundingRect.x > (currentPage + 1) * pageWidth && words.length > 0) {
+        removedWord = words.pop(); // Remove the last word
+        let anchor = new _vendor_hypothesis_anchoring_types__WEBPACK_IMPORTED_MODULE_0__.TextQuoteAnchor(element, removedWord, {
+          prefix: words.join(" ") + " ",
+          suffix: " " + removedWords.join(" ")
+        });
+        anchor.toRange();
+        wordBoundingRect = anchor.toRange().getBoundingClientRect();
+        wordBoundingRect.x += window.scrollX;
+        removedWords.unshift(removedWord);
+      }
+
+      // If after removing all words it still doesn't fit, start on a new page
+      if (words.length === 0 && wordBoundingRect.x > (currentPage + 1) * pageWidth) {
+        // This should never happen!!!
+        currentPage++; // Move to the next page
+        //TODO the element must go through the regular processing in this case
+      } else {
+        words.push(removedWord);
+        removedWords.shift();
+        addTextToPage(words.join(" "), currentPage);
+        addTextToPage(removedWords.join(" "), currentPage + 1);
+      }
+    }
+    function addTextToPage(text, page) {
+      // const existingText = rangeData[page.toString()];
+      // if (existingText !== undefined) {
+      //   const newText = existingText + "\n" + text;
+      //   rangeData[page.toString()] = newText;
+      // } else {
+      //   rangeData[page.toString()] = text;
+      // }
+      if (!rangeData[page]) rangeData[page] = "";
+      rangeData[page] += +"\n" + text + (element.nodeType === Node.TEXT_NODE ? "\n" : ""); // Append new line for text nodes if needed
+    }
+
+    if (rect.x > (currentPage + 1) * pageWidth) {
+      // New Page
+      currentPage++;
+    }
+    if (rect.width > pageWidth) {
+      processElement();
+    } else {
+      addTextToPage(element.textContent, currentPage);
+    }
+  });
+  return rangeData;
 }
 function scrollToRange(range) {
   return scrollToRect(range.getBoundingClientRect());

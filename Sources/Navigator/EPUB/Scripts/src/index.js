@@ -20,6 +20,7 @@ import {
   setCSSProperties,
   rectFromLocator,
   clientRectFromLocator,
+  calculateHorizontalPageRanges,
 } from "./utils";
 import { getDecorations, registerTemplates } from "./decorator";
 
@@ -36,6 +37,7 @@ global.readium = {
   removeProperty: removeProperty,
   rectFromLocator: rectFromLocator,
   clientRectFromLocator: clientRectFromLocator,
+  calculateHorizontalPageRanges: calculateHorizontalPageRanges,
   // decoration
   registerDecorationTemplates: registerTemplates,
   getDecorations: getDecorations,
