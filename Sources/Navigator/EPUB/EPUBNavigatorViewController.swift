@@ -814,6 +814,38 @@ open class EPUBNavigatorViewController: UIViewController,
         })
     }
     
+    public func getPageRanges(_ href: String, completion: @escaping ([String]) -> Void) {
+        if let spreadView = loadedSpreadView(forHREF: href) {
+            let script = "readium.calculateHorizontalPageRanges()"
+            spreadView.evaluateScript(script, inHREF: href, completion: { result in
+                var pages = [String]()
+                do {
+                    let readiumResult = try result.get()
+                    self.log(.debug, "ranges result: \(readiumResult)")
+                    
+                    if let json = readiumResult as? [String:String] {
+                        let keys = json.keys.sorted(by: {Int($0) ?? 0 < Int($1) ?? 0})
+                        
+                        for key in keys {
+                            if let value = json[key] as? String {
+                                pages.append(value)
+                                print("\n\n\n")
+                                print("<\(value)>")
+                            }
+                        }
+                    }
+                } catch {
+                    self.log(.error, error)
+                }
+                DispatchQueue.main.async {
+                    completion(pages)
+                }
+            })
+        } else {
+            completion([])
+        }
+    }
+    
     public func currentSpreadDisplayingLastPage() -> Bool {
         
         if let spreadView = paginationView.loadedViews[paginationView.currentIndex] as? EPUBSpreadView {
