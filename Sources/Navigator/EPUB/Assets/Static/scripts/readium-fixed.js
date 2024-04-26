@@ -2615,17 +2615,19 @@ function calculateHorizontalPageRanges() {
       }
       if (rect.width > pageWidth) {
         // If element is wider than page width, process its content word by word
-        processTextContent(element);
+        processTextContent(element, element.textContent);
       } else {
         // If element fits within the page, simply add its text
         addTextToPage(element.textContent, currentPage);
       }
     }
   }
-  function processTextContent(element) {
-    let words = element.textContent.split(" ");
+  function processTextContent(element, textContent) {
+    let words = textContent.split(" ");
     let removedText = "";
     let removedWord = "";
+    let firstPoppedElement = true;
+    let remainderDoesNotFitOnNextPage = false;
     let wordBoundingRect = new DOMRect(Number.MAX_VALUE,
     // we use the max possible value for 'x' to make sure it enters the 'while' iterator
     0, 0, 0);
@@ -2646,9 +2648,16 @@ function calculateHorizontalPageRanges() {
         // log("word rect x: " + wordBoundingRect.x);
         const spacing = /\S/.test(removedText) ? " " : ""; // check if there are any alpha-numeric characters
 
-        if (words.length > 0) {
+        if (wordBoundingRect.x > (currentPage + 1) * pageWidth) {
           removedText = removedWord + spacing + removedText;
         }
+        if (firstPoppedElement) {
+          if (wordBoundingRect.x > (currentPage + 2) * pageWidth) {
+            log("text does not fit on the next page");
+            remainderDoesNotFitOnNextPage = true;
+          }
+        }
+        firstPoppedElement = false;
       } catch (_unused) {
         // log("could not find range for word");
         if (removedWord === "") {
@@ -2665,11 +2674,14 @@ function calculateHorizontalPageRanges() {
     } else {
       words.push(removedWord);
       addTextToPage(words.join(" "), currentPage);
+      currentPage++;
 
       // TODO what happens if the remainder of the text doesn't fit on the next page?
-      currentPage++;
-      // const remainder = element.textContent.endsWith(" ") ? " " : "";
-      addTextToPage(removedText, currentPage);
+      if (remainderDoesNotFitOnNextPage) {
+        processTextContent(element, removedText);
+      } else {
+        addTextToPage(removedText, currentPage);
+      }
     }
   }
   function addTextToPage(text, page) {
