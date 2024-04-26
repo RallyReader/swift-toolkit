@@ -802,12 +802,13 @@ open class EPUBNavigatorViewController: UIViewController,
     public func getPageRanges(_ href: String, completion: @escaping ([String]) -> Void) {
         if let spreadView = loadedSpreadView(forHREF: href) {
             let script = "readium.calculateHorizontalPageRanges()"
+            let date = Date()
             spreadView.evaluateScript(script, inHREF: href, completion: { result in
                 var pages = [String]()
                 do {
                     let readiumResult = try result.get()
-                    self.log(.debug, "ranges result: \(readiumResult)")
-                    
+//                    self.log(.debug, "ranges result: \(readiumResult)")
+                    print("[RANGES] :: got pages in \(-date.timeIntervalSinceNow)")
                     if let json = readiumResult as? [String:String] {
                         let keys = json.keys.sorted(by: {Int($0) ?? 0 < Int($1) ?? 0})
                         

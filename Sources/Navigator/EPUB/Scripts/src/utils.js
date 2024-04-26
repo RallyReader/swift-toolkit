@@ -251,167 +251,139 @@ export function clientRectFromLocator(locator, reset) {
 
 export function calculateHorizontalPageRanges() {
   const rangeData = {};
-  const blockTags = [
-    "html",
-    "head",
-    "frameset",
-    "script",
-    "noscript",
-    "style",
-    "meta",
-    "link",
-    "title",
-    "frame",
-    "noframes",
-    "section",
-    "nav",
-    "aside",
-    "hgroup",
-    "header",
-    "footer",
-    "p",
-    "h1",
-    "h2",
-    "h3",
-    "h4",
-    "h5",
-    "h6",
-    "ul",
-    "ol",
-    "pre",
-    "div",
-    "blockquote",
-    "hr",
-    "address",
-    "figure",
-    "figcaption",
-    "form",
-    "fieldset",
-    "ins",
-    "del",
-    "s",
-    "dl",
-    "dt",
-    "dd",
-    "li",
-    "table",
-    "caption",
-    "thead",
-    "tfoot",
-    "tbody",
-    "colgroup",
-    "col",
-    "tr",
-    "th",
-    "td",
-    "canvas",
-    "details",
-    "menu",
-    "plaintext",
-    "template",
-    "article",
-    "main",
-    "svg",
-    "math",
-  ];
-  const selectorString = blockTags.join(",");
-  const allElements = document.body.querySelectorAll(selectorString);
-  const elements = Array.from(allElements).filter((el) => {
-    // Check that there are no children of the same block tag type
-    const hasNoChildrenOfSameType = !Array.from(el.children).some((child) =>
-      blockTags.includes(child.tagName.toLowerCase())
-    );
-    // Check that the text content is not just whitespace
-    const containsText = el.textContent.trim().length > 0;
-    return hasNoChildrenOfSameType && containsText;
-  });
-
+  let node = document.body.firstChild;
   let currentPage = 0;
   let pageWidth = window.innerWidth;
 
-  elements.forEach((element) => {
-    let rect = element.getBoundingClientRect();
-    rect.x += window.scrollX;
-    log(element.textContent);
-    log(
-      "rect frame element = (" +
-        rect.x +
-        ", " +
-        rect.y +
-        ", " +
-        rect.width +
-        ", " +
-        rect.height +
-        ")"
+  function processElement(element) {
+    // log("node name " + element.nodeName);
+    // log("<" + element.textContent + ">");
+
+    let rect;
+
+    let processText = false;
+    if (element.nodeType === Node.TEXT_NODE) {
+      if (/\S/.test(element.textContent)) {
+        processText = true;
+        let range = document.createRange();
+        range.selectNode(element);
+        rect = range.getBoundingClientRect();
+      } else {
+        addTextToPage(element.textContent, currentPage);
+      }
+    } else if (element.nodeType === Node.ELEMENT_NODE) {
+      processText = true;
+      rect = element.getBoundingClientRect();
+    }
+
+    if (processText) {
+      rect.x += window.scrollX;
+
+      // log("rect x: " + rect.x);
+
+      // New Page if current element starts beyond the current page boundary
+      if (rect.x > (currentPage + 1) * pageWidth) {
+        currentPage++;
+      }
+
+      if (rect.width > pageWidth) {
+        // If element is wider than page width, process its content word by word
+        processTextContent(element);
+      } else {
+        // If element fits within the page, simply add its text
+        addTextToPage(element.textContent, currentPage);
+      }
+    }
+  }
+
+  function processTextContent(element) {
+    let words = element.textContent.split(" ");
+    let removedText = "";
+    let removedWord = "";
+
+    let wordBoundingRect = new DOMRect(
+      Number.MAX_VALUE, // we use the max possible value for 'x' to make sure it enters the 'while' iterator
+      0,
+      0,
+      0
     );
 
-    function processElement() {
-      let words = element.textContent.split(" ");
-      let removedWords = [];
-      let removedWord = "";
+    // Reduce the element text until it fits the page height
+    while (
+      wordBoundingRect.x > (currentPage + 1) * pageWidth &&
+      words.length > 0
+    ) {
+      removedWord = words.pop(); // Remove the last word
 
-      let wordBoundingRect = new DOMRect(
-        Number.MAX_VALUE, // we use the max possible value for 'x' to make sure it enters the 'while' iterator
-        0,
-        0,
-        0
-      );
+      // log("word: <" + removedWord + ">");
 
-      // Reduce the element text until it fits the page height
-      while (
-        wordBoundingRect.x > (currentPage + 1) * pageWidth &&
-        words.length > 0
-      ) {
-        removedWord = words.pop(); // Remove the last word
+      try {
         let anchor = new TextQuoteAnchor(element, removedWord, {
           prefix: words.join(" ") + " ",
-          suffix: " " + removedWords.join(" "),
+          suffix: " " + removedText,
         });
 
-        anchor.toRange();
         wordBoundingRect = anchor.toRange().getBoundingClientRect();
         wordBoundingRect.x += window.scrollX;
-        removedWords.unshift(removedWord);
-      }
+        // log("word rect x: " + wordBoundingRect.x);
+        const spacing = /\S/.test(removedText) ? " " : ""; // check if there are any alpha-numeric characters
 
-      // If after removing all words it still doesn't fit, start on a new page
-      if (
-        words.length === 0 &&
-        wordBoundingRect.x > (currentPage + 1) * pageWidth
-      ) {
-        // This should never happen!!!
-        currentPage++; // Move to the next page
-        //TODO the element must go through the regular processing in this case
-      } else {
-        words.push(removedWord);
-        removedWords.shift();
-
-        addTextToPage(words.join(" "), currentPage);
-        addTextToPage(removedWords.join(" "), currentPage + 1);
+        if (words.length > 0) {
+          removedText = removedWord + spacing + removedText;
+        }
+      } catch {
+        // log("could not find range for word");
+        if (removedWord === "") {
+          removedText = " " + removedText;
+        }
       }
     }
 
-    function addTextToPage(text, page) {
-      const existingText = rangeData[page.toString()];
-      if (existingText !== undefined) {
-        const newText = existingText + "\n" + text;
-        rangeData[page.toString()] = newText;
-      } else {
-        rangeData[page.toString()] = text;
-      }
-    }
-
-    if (rect.x > (currentPage + 1) * pageWidth) {
-      // New Page
-      currentPage++;
-    }
-
-    if (rect.width > pageWidth) {
-      processElement();
+    // If after removing all words it still doesn't fit, start on a new page
+    if (
+      words.length === 0 &&
+      wordBoundingRect.x > (currentPage + 1) * pageWidth
+    ) {
+      // This should never happen!!!
+      currentPage++; // Move to the next page
+      //TODO the element must go through the regular processing in this case
     } else {
-      addTextToPage(element.textContent, currentPage);
+      words.push(removedWord);
+
+      addTextToPage(words.join(" "), currentPage);
+
+      // TODO what happens if the remainder of the text doesn't fit on the next page?
+      currentPage++;
+      // const remainder = element.textContent.endsWith(" ") ? " " : "";
+      addTextToPage(removedText, currentPage);
     }
-  });
+  }
+
+  function addTextToPage(text, page) {
+    const existingText = rangeData[page.toString()];
+    if (existingText !== undefined) {
+      const newText = existingText + text;
+      rangeData[page.toString()] = newText;
+    } else {
+      rangeData[page.toString()] = text;
+    }
+  }
+
+  while (node) {
+    if (node.childNodes.length > 1) {
+      log("has child nodes");
+      let child = node.firstChild;
+      while (child) {
+        processElement(child);
+        child = child.nextSibling;
+      }
+      node = node.nextSibling;
+    } else {
+      // If no child nodes, process the element itself
+      processElement(node);
+      node = node.nextSibling;
+    }
+  }
 
   return rangeData;
 }
