@@ -253,11 +253,16 @@ export function calculateHorizontalPageRanges() {
   const rangeData = {};
   let node = document.body.firstChild;
   let currentPage = 0;
+  let rangeIndex = 0;
   let pageWidth = window.innerWidth;
+  // const pagesPerRange = 2;
+  let currentTextLength = 0;
+  const minCharactersPerRange = 1000;
+  let previousElementRect = new DOMRect(0, 0, 0, 0);
 
   function processElement(element) {
     // log("node name " + element.nodeName);
-    // log("<" + element.textContent + ">");
+    log("<" + element.textContent + ">");
 
     let rect;
 
@@ -269,7 +274,7 @@ export function calculateHorizontalPageRanges() {
         range.selectNode(element);
         rect = range.getBoundingClientRect();
       } else {
-        addTextToPage(element.textContent, currentPage);
+        addTextToRange(element.textContent, rangeIndex);
       }
     } else if (element.nodeType === Node.ELEMENT_NODE) {
       processText = true;
@@ -280,19 +285,34 @@ export function calculateHorizontalPageRanges() {
       rect.x += window.scrollX;
 
       // log("rect x: " + rect.x);
+      // log("rext width: " + rect.width);
+      // log("current page: " + currentPage);
+      // log("current text length: " + currentTextLength);
 
-      // New Page if current element starts beyond the current page boundary
       if (rect.x > (currentPage + 1) * pageWidth) {
         currentPage++;
+        // log("increase current page: " + currentPage);
+        if (
+          currentTextLength >= minCharactersPerRange &&
+          previousElementRect.x + previousElementRect.width <= rect.x
+        ) {
+          rangeIndex++;
+          currentTextLength = 0;
+          // addTextToRange(element.textContent, rangeIndex);
+        }
       }
 
-      if (rect.width > pageWidth) {
-        // If element is wider than page width, process its content word by word
+      if (
+        currentTextLength >= minCharactersPerRange &&
+        rect.width > pageWidth
+      ) {
         processTextContent(element, element.textContent);
       } else {
-        // If element fits within the page, simply add its text
-        addTextToPage(element.textContent, currentPage);
+        currentTextLength += element.textContent.length;
+        addTextToRange(element.textContent, rangeIndex);
       }
+
+      previousElementRect = rect;
     }
   }
 
@@ -356,31 +376,42 @@ export function calculateHorizontalPageRanges() {
       wordBoundingRect.x > (currentPage + 1) * pageWidth
     ) {
       // This should never happen!!!
-      currentPage++; // Move to the next page
+      log("this should never happen");
+      rangeIndex += 1;
+      currentPage += 1; // Move to the next page
       //TODO the element must go through the regular processing in this case
+      currentTextLength = textContent.length;
+      addTextToRange(textContent, rangeIndex);
     } else {
       words.push(removedWord);
 
-      addTextToPage(words.join(" "), currentPage);
-      currentPage++;
+      addTextToRange(words.join(" "), rangeIndex);
+      currentPage += 1;
+      rangeIndex += 1;
 
-      // TODO what happens if the remainder of the text doesn't fit on the next page?
+      // TODO do we need to also check the current text length here????
       if (remainderDoesNotFitOnNextPage) {
-        processTextContent(element, removedText);
-      } else {
-        addTextToPage(removedText, currentPage);
+        log("remainderDoesNotFitOnNextPage");
+        // processTextContent(element, removedText);
       }
+      // else {
+      currentTextLength = removedText.length;
+      addTextToRange(removedText, rangeIndex);
+      // }
     }
   }
 
-  function addTextToPage(text, page) {
-    const existingText = rangeData[page.toString()];
+  function addTextToRange(text, range) {
+    const existingText = rangeData[range.toString()];
     if (existingText !== undefined) {
       const newText = existingText + text;
-      rangeData[page.toString()] = newText;
+      rangeData[range.toString()] = newText;
     } else {
-      rangeData[page.toString()] = text;
+      rangeData[range.toString()] = text;
     }
+
+    log("adding text: <" + text + ">");
+    log("to range index: " + range);
   }
 
   while (node) {
