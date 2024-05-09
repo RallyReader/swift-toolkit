@@ -2563,7 +2563,7 @@ function rectFromLocator(locator) {
   return (0,_rect__WEBPACK_IMPORTED_MODULE_2__.toNativeRect)(range.getBoundingClientRect());
 }
 let rectsCache = new LRUCache(10);
-function clientRectFromLocator(locator, reset) {
+function clientRectFromLocator(locator, reset, cache) {
   const key = JSON.stringify(locator);
   let nativeRect = rectsCache.get(key);
   if (nativeRect !== undefined && reset === 0) {
@@ -2577,7 +2577,9 @@ function clientRectFromLocator(locator, reset) {
   const clientRects = (0,_rect__WEBPACK_IMPORTED_MODULE_2__.getClientRectsNoOverlap)(range, true);
   const rect = clientRects[0];
   nativeRect = (0,_rect__WEBPACK_IMPORTED_MODULE_2__.toNativeRect)(rect);
-  rectsCache.set(key, nativeRect);
+  if (cache === 1) {
+    rectsCache.set(key, nativeRect);
+  }
   return nativeRect;
 }
 function calculateHorizontalPageRanges() {

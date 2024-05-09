@@ -230,9 +230,10 @@ export function rectFromLocator(locator) {
 }
 
 let rectsCache = new LRUCache(10);
-export function clientRectFromLocator(locator, reset) {
+export function clientRectFromLocator(locator, reset, cache) {
   const key = JSON.stringify(locator);
   let nativeRect = rectsCache.get(key);
+
   if (nativeRect !== undefined && reset === 0) {
     log("return cached rect");
     return nativeRect;
@@ -244,7 +245,10 @@ export function clientRectFromLocator(locator, reset) {
   const clientRects = getClientRectsNoOverlap(range, true);
   const rect = clientRects[0];
   nativeRect = toNativeRect(rect);
-  rectsCache.set(key, nativeRect);
+
+  if (cache === 1) {
+    rectsCache.set(key, nativeRect);
+  }
 
   return nativeRect;
 }
