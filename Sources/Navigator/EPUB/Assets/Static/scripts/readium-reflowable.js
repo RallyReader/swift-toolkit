@@ -2613,25 +2613,27 @@ function calculateHorizontalPageRanges() {
     }
     if (processText) {
       rect.x += window.scrollX;
-      log("rect x: " + rect.x);
-      log("rext width: " + rect.width);
-      log("current page: " + currentPage);
-      log("current text length: " + currentTextLength);
-      log("current page x: " + currentPage * pageWidth);
-      log("next page x: " + (currentPage + 1) * pageWidth);
+
+      // log("rect x: " + rect.x);
+      // log("rext width: " + rect.width);
+      // log("current page: " + currentPage);
+      // log("current text length: " + currentTextLength);
+      // log("current page x: " + currentPage * pageWidth);
+      // log("next page x: " + (currentPage + 1) * pageWidth);
+
       if (rect.x > (currentPage + 1) * pageWidth) {
         currentPage++;
         // log("increase current page: " + currentPage);
         if (currentTextLength >= minCharactersPerRange && previousElementRect.x + previousElementRect.width <= rect.x) {
           rangeIndex++;
-          currentTextLength = 0;
-          log("increase range index: " + rangeIndex);
+          // currentTextLength = 0;
+          // log("increase range index: " + rangeIndex);
           // addTextToRange(element.textContent, rangeIndex);
         }
       }
 
       if (currentTextLength >= minCharactersPerRange && rect.width > pageWidth) {
-        log("paragraph does not fit on current page");
+        // log("paragraph does not fit on current page");
         processTextContent(element, element.textContent);
       } else {
         currentTextLength += element.textContent.length;
@@ -2660,12 +2662,14 @@ function calculateHorizontalPageRanges() {
           prefix: words.join(" ") + " ",
           suffix: removedText.length > 0 ? " " + removedText : ""
         });
-        log("anchor prefix: " + anchor.context.prefix);
-        log("anchor sufix: " + anchor.context.suffix);
-        log("anchor highlight: " + anchor.exact);
+
+        // log("anchor prefix: " + anchor.context.prefix);
+        // log("anchor sufix: " + anchor.context.suffix);
+        // log("anchor highlight: " + anchor.exact);
+
         wordBoundingRect = anchor.toRange().getBoundingClientRect();
         wordBoundingRect.x += window.scrollX;
-        log("word rect x: " + wordBoundingRect.x);
+        // log("word rect x: " + wordBoundingRect.x);
         const spacing = /\S/.test(removedText) ? " " : ""; // check if there are any alpha-numeric characters
 
         if (wordBoundingRect.x > (currentPage + 1) * pageWidth) {
@@ -2673,7 +2677,7 @@ function calculateHorizontalPageRanges() {
         }
         if (firstPoppedElement) {
           if (wordBoundingRect.x > (currentPage + 2) * pageWidth) {
-            log("text does not fit on the next page");
+            // log("text does not fit on the next page");
             remainderDoesNotFitOnNextPage = true;
           }
         }
