@@ -259,13 +259,14 @@ export function calculateHorizontalPageRanges() {
   let currentPage = 0;
   let rangeIndex = 0;
   let pageWidth = window.innerWidth;
+
   // const pagesPerRange = 2;
   let currentTextLength = 0;
   const minCharactersPerRange = 1000;
   let previousElementRect = new DOMRect(0, 0, 0, 0);
 
   function processElement(element) {
-    // log("node name " + element.nodeName);
+    log("node name " + element.nodeName);
     log("<" + element.textContent + ">");
 
     let rect;
@@ -292,6 +293,8 @@ export function calculateHorizontalPageRanges() {
       // log("rext width: " + rect.width);
       // log("current page: " + currentPage);
       // log("current text length: " + currentTextLength);
+      // log("current page x: " + currentPage * pageWidth);
+      // log("next page x: " + (currentPage + 1) * pageWidth);
 
       if (rect.x > (currentPage + 1) * pageWidth) {
         currentPage++;
@@ -301,7 +304,8 @@ export function calculateHorizontalPageRanges() {
           previousElementRect.x + previousElementRect.width <= rect.x
         ) {
           rangeIndex++;
-          currentTextLength = 0;
+          // currentTextLength = 0;
+          // log("increase range index: " + rangeIndex);
           // addTextToRange(element.textContent, rangeIndex);
         }
       }
@@ -310,6 +314,7 @@ export function calculateHorizontalPageRanges() {
         currentTextLength >= minCharactersPerRange &&
         rect.width > pageWidth
       ) {
+        // log("paragraph does not fit on current page");
         processTextContent(element, element.textContent);
       } else {
         currentTextLength += element.textContent.length;
@@ -341,13 +346,17 @@ export function calculateHorizontalPageRanges() {
     ) {
       removedWord = words.pop(); // Remove the last word
 
-      // log("word: <" + removedWord + ">");
+      log("word: <" + removedWord + ">");
 
       try {
         let anchor = new TextQuoteAnchor(element, removedWord, {
           prefix: words.join(" ") + " ",
-          suffix: " " + removedText,
+          suffix: removedText.length > 0 ? " " + removedText : "",
         });
+
+        // log("anchor prefix: " + anchor.context.prefix);
+        // log("anchor sufix: " + anchor.context.suffix);
+        // log("anchor highlight: " + anchor.exact);
 
         wordBoundingRect = anchor.toRange().getBoundingClientRect();
         wordBoundingRect.x += window.scrollX;
@@ -418,20 +427,23 @@ export function calculateHorizontalPageRanges() {
     log("to range index: " + range);
   }
 
-  while (node) {
+  function processNode(node) {
+    // log("process node <" + node.textContent + ">");
     if (node.childNodes.length > 1) {
-      log("has child nodes");
       let child = node.firstChild;
       while (child) {
-        processElement(child);
+        // log("<         1         >");
+        processNode(child);
         child = child.nextSibling;
       }
-      node = node.nextSibling;
     } else {
-      // If no child nodes, process the element itself
       processElement(node);
-      node = node.nextSibling;
     }
+  }
+
+  while (node) {
+    processNode(node);
+    node = node.nextSibling;
   }
 
   return rangeData;
