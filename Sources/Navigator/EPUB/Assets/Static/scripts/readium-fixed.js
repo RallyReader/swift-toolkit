@@ -2632,7 +2632,7 @@ function calculateHorizontalPageRanges() {
         }
       }
 
-      if (currentTextLength >= minCharactersPerRange && rect.width > pageWidth) {
+      if (currentTextLength >= minCharactersPerRange && rect.x + rect.width > (currentPage + 1) * pageWidth) {
         // log("paragraph does not fit on current page");
         processTextContent(element, element.textContent);
       } else {
