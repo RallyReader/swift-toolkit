@@ -279,9 +279,13 @@ export function calculateHorizontalPageRanges() {
         range.selectNode(element);
         rect = range.getBoundingClientRect();
       } else {
+        log("node text does not have text");
         addTextToRange(element.textContent, rangeIndex);
       }
-    } else if (element.nodeType === Node.ELEMENT_NODE) {
+    } else if (
+      element.nodeType === Node.ELEMENT_NODE &&
+      element.textContent.length > 0
+    ) {
       processText = true;
       rect = element.getBoundingClientRect();
     }
@@ -289,24 +293,34 @@ export function calculateHorizontalPageRanges() {
     if (processText) {
       rect.x += window.scrollX;
 
-      // log("rect x: " + rect.x);
-      // log("rext width: " + rect.width);
-      // log("current page: " + currentPage);
-      // log("current text length: " + currentTextLength);
-      // log("current page x: " + currentPage * pageWidth);
-      // log("next page x: " + (currentPage + 1) * pageWidth);
+      log("rect x: " + rect.x);
+      log("rext width: " + rect.width);
+      log("current page: " + currentPage);
+      log("current text length: " + currentTextLength);
+      log("current page x: " + currentPage * pageWidth);
+      log("next page x: " + (currentPage + 1) * pageWidth);
 
       if (rect.x > (currentPage + 1) * pageWidth) {
         currentPage++;
-        // log("increase current page: " + currentPage);
-        if (
-          currentTextLength >= minCharactersPerRange &&
-          previousElementRect.x + previousElementRect.width <= rect.x
-        ) {
+        log("increase current page: " + currentPage);
+
+        log("previous rect x: " + previousElementRect.x);
+        log("previous rect width: " + previousElementRect.width);
+
+        // if previousElementRect.x + previousElementRect.width is more than curent page x+width, then we compare with next next page max x
+
+        let maxX = previousElementRect.x + previousElementRect.width;
+        if (maxX > (currentPage + 1) * pageWidth) {
+          maxX = (currentPage + 1) * pageWidth + pageWidth;
+        }
+        if (currentTextLength >= minCharactersPerRange && maxX < rect.x) {
           rangeIndex++;
           // currentTextLength = 0;
-          // log("increase range index: " + rangeIndex);
-          // addTextToRange(element.textContent, rangeIndex);
+          log("increase range index: " + rangeIndex);
+          currentTextLength = element.textContent.length;
+          addTextToRange(element.textContent, rangeIndex);
+          previousElementRect = rect;
+          return;
         }
       }
 
@@ -314,11 +328,20 @@ export function calculateHorizontalPageRanges() {
         currentTextLength >= minCharactersPerRange &&
         rect.x + rect.width > (currentPage + 1) * pageWidth
       ) {
-        // log("paragraph does not fit on current page");
+        log("paragraph does not fit on current page");
         processTextContent(element, element.textContent);
       } else {
+        // if (
+        //   currentTextLength + element.textContent.length >
+        //   minCharactersPerRange
+        // ) {
+        //   log("paragraph is too big; analyze words");
+        //   processTextContent(element, element.textContent);
+        // } else {
+        log("add entire paragraph");
         currentTextLength += element.textContent.length;
         addTextToRange(element.textContent, rangeIndex);
+        // }
       }
 
       previousElementRect = rect;
@@ -326,7 +349,8 @@ export function calculateHorizontalPageRanges() {
   }
 
   function processTextContent(element, textContent) {
-    let words = textContent.split(" ");
+    // Split the text by spaces or dashes, and keep the delimiters
+    let words = textContent.split(/(?<=\S)(?=[\s-–—―‒])|(?<=[\s-–—―‒])(?=\S)/); // Split on spaces or dashes, keeping them as separate tokens
     let removedText = "";
     let removedWord = "";
     let firstPoppedElement = true;
@@ -341,44 +365,53 @@ export function calculateHorizontalPageRanges() {
 
     // Reduce the element text until it fits the page height
     while (
-      wordBoundingRect.x > (currentPage + 1) * pageWidth &&
+      wordBoundingRect.x + wordBoundingRect.width >
+        (currentPage + 1) * pageWidth &&
       words.length > 0
     ) {
-      removedWord = words.pop(); // Remove the last word
+      removedWord = words.pop(); // Remove the last word or delimiter
 
       log("word: <" + removedWord + ">");
 
-      try {
-        let anchor = new TextQuoteAnchor(element, removedWord, {
-          prefix: words.join(" ") + " ",
-          suffix: removedText.length > 0 ? " " + removedText : "",
-        });
+      if (removedWord === " ") {
+        removedText = removedWord + removedText;
+      } else {
+        try {
+          let anchor = new TextQuoteAnchor(element, removedWord, {
+            prefix: words.join(""), // Join without adding any additional characters
+            suffix: removedText.length > 0 ? removedText : "",
+          });
 
-        // log("anchor prefix: " + anchor.context.prefix);
-        // log("anchor sufix: " + anchor.context.suffix);
-        // log("anchor highlight: " + anchor.exact);
+          // log("anchor prefix: " + anchor.context.prefix);
+          // log("anchor suffix: " + anchor.context.suffix);
+          // log("anchor highlight: " + anchor.exact);
 
-        wordBoundingRect = anchor.toRange().getBoundingClientRect();
-        wordBoundingRect.x += window.scrollX;
-        // log("word rect x: " + wordBoundingRect.x);
-        const spacing = /\S/.test(removedText) ? " " : ""; // check if there are any alpha-numeric characters
+          wordBoundingRect = anchor.toRange().getBoundingClientRect();
+          wordBoundingRect.x += window.scrollX;
+          log("word rect x: " + wordBoundingRect.x);
+          log("word rect width: " + wordBoundingRect.width);
+          log("current page max x: " + (currentPage + 1) * pageWidth);
 
-        if (wordBoundingRect.x > (currentPage + 1) * pageWidth) {
-          removedText = removedWord + spacing + removedText;
-        }
-
-        if (firstPoppedElement) {
-          if (wordBoundingRect.x > (currentPage + 2) * pageWidth) {
-            // log("text does not fit on the next page");
-            remainderDoesNotFitOnNextPage = true;
+          if (
+            wordBoundingRect.x + wordBoundingRect.width >
+            (currentPage + 1) * pageWidth
+          ) {
+            removedText = removedWord + removedText;
           }
-        }
 
-        firstPoppedElement = false;
-      } catch {
-        // log("could not find range for word");
-        if (removedWord === "") {
-          removedText = " " + removedText;
+          if (firstPoppedElement) {
+            if (wordBoundingRect.x > (currentPage + 2) * pageWidth) {
+              log("text does not fit on the next page");
+              remainderDoesNotFitOnNextPage = true;
+            }
+          }
+
+          firstPoppedElement = false;
+        } catch {
+          log("could not find range for word");
+          // if (removedWord === "") {
+          //     removedText = removedText;
+          // }
         }
       }
     }
@@ -398,7 +431,7 @@ export function calculateHorizontalPageRanges() {
     } else {
       words.push(removedWord);
 
-      addTextToRange(words.join(" "), rangeIndex);
+      addTextToRange(words.join(""), rangeIndex);
       currentPage += 1;
       rangeIndex += 1;
 
