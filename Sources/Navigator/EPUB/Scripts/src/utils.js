@@ -350,7 +350,7 @@ export function calculateHorizontalPageRanges() {
 
   function processTextContent(element, textContent) {
     // Split the text by spaces or dashes, and keep the delimiters
-    let words = textContent.split(/(?<=\S)(?=[\s-–—―‒])|(?<=[\s-–—―‒])(?=\S)/); // Split on spaces or dashes, keeping them as separate tokens
+    let words = textContent.split(/(\s|[-–—―‒])/g).filter(Boolean); // Split on spaces or dashes, keeping them as separate tokens
     let removedText = "";
     let removedWord = "";
     let firstPoppedElement = true;
