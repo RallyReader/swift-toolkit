@@ -2621,7 +2621,8 @@ function calculateHorizontalPageRanges() {
       log("current page x: " + currentPage * pageWidth);
       log("next page x: " + (currentPage + 1) * pageWidth);
       if (rect.x > (currentPage + 1) * pageWidth) {
-        currentPage++;
+        const additionalPages = Math.floor(rect.x / pageWidth - currentPage);
+        currentPage = currentPage + additionalPages;
         log("increase current page: " + currentPage);
         log("previous rect x: " + previousElementRect.x);
         log("previous rect width: " + previousElementRect.width);
