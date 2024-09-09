@@ -21,7 +21,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v2
       - name: Install dependencies
         run: |
           brew update
@@ -33,12 +33,10 @@ jobs:
           git diff --exit-code Support/Carthage/Readium.xcodeproj
       - name: Build
         run: |
-          set -eo pipefail
-          xcodebuild build-for-testing -scheme "$scheme" -destination "platform=$platform,name=$device" | if command -v xcpretty &> /dev/null; then xcpretty; else cat; fi
+          xcodebuild build-for-testing -scheme "$scheme" -destination "platform=$platform,name=$device"
       - name: Test
         run: |
-          set -eo pipefail
-          xcodebuild test-without-building -scheme "$scheme" -destination "platform=$platform,name=$device" | if command -v xcpretty &> /dev/null; then xcpretty; else cat; fi
+          xcodebuild test-without-building -scheme "$scheme" -destination "platform=$platform,name=$device"
 
   lint:
     name: Lint
@@ -49,24 +47,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
-      - name: Install pnpm
-        uses: pnpm/action-setup@v2
-        with:
-          package_json_file: Sources/Navigator/EPUB/Scripts/package.json
-          run_install: false
-      - name: Setup cache
-        uses: actions/setup-node@v3
-        with:
-          node-version: 20
-          cache: 'pnpm'
-          cache-dependency-path: Sources/Navigator/EPUB/Scripts/pnpm-lock.yaml
+        uses: actions/checkout@v2
       - name: Install dependencies
-        run: pnpm --dir "$scripts" install --frozen-lockfile
-      - name: Lint
-        run: pnpm --dir "$scripts" run lint
-      - name: Check formatting
-        run: pnpm --dir "$scripts" run checkformat
+        run: yarn --cwd "$scripts" install --frozen-lockfile
+      - name: Lint JavaScript
+        run: yarn --cwd "$scripts" run lint
+      - name: Check JavaScript formatting
+        run: yarn --cwd "$scripts" run checkformat
       - name: Check if bundled scripts are up-to-date
         run: |
             make scripts
@@ -84,7 +71,7 @@ jobs:
     environment: LCP
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v2
       - name: Install dependencies
         run: |
           brew update
@@ -93,8 +80,7 @@ jobs:
         run: make dev lcp=${{ secrets.LCP_URL_SPM }}
       - name: Build
         run: |
-          set -eo pipefail
-          xcodebuild build -scheme TestApp -destination "platform=$platform,name=$device" | if command -v xcpretty &> /dev/null; then xcpretty; else cat; fi
+          xcodebuild build -scheme TestApp -destination "platform=$platform,name=$device"
 
   int-spm:
     name: Integration (Swift Package Manager)
@@ -106,7 +92,7 @@ jobs:
     environment: LCP
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v2
       # We can't use the current github.sha with pull_request event, because they will
       # reference the merge commit which cannot be fetched with SPM.
       - name: Set commit SHA
@@ -121,8 +107,7 @@ jobs:
         run: make spm lcp=${{ secrets.LCP_URL_SPM }} commit=$commit_sha
       - name: Build
         run: |
-          set -eo pipefail
-          xcodebuild build -scheme TestApp -destination "platform=$platform,name=$device" | if command -v xcpretty &> /dev/null; then xcpretty; else cat; fi
+          xcodebuild build -scheme TestApp -destination "platform=$platform,name=$device"
 
   int-carthage:
     name: Integration (Carthage)
@@ -134,7 +119,7 @@ jobs:
     environment: LCP
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v2
       # We can't use the current github.sha with pull_request event, because they will
       # reference the merge commit which cannot be fetched with Carthage.
       - name: Set commit SHA
@@ -149,8 +134,7 @@ jobs:
         run: make carthage lcp=${{ secrets.LCP_URL_CARTHAGE }} commit=$commit_sha
       - name: Build
         run: |
-          set -eo pipefail
-          xcodebuild build -scheme TestApp -destination "platform=$platform,name=$device" | if command -v xcpretty &> /dev/null; then xcpretty; else cat; fi
+          xcodebuild build -scheme TestApp -destination "platform=$platform,name=$device"
 
   # Warning: This job cannot actually test the state of the current commit,
   # but will check that the latest branch/tag set in the Podspecs are valid.
@@ -164,7 +148,7 @@ jobs:
     environment: LCP
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v2
       - name: Install dependencies
         run: |
           brew update
@@ -173,5 +157,4 @@ jobs:
         run: make cocoapods lcp=${{ secrets.LCP_URL_COCOAPODS }} commit=$commit_sha
       - name: Build
         run: |
-          set -eo pipefail
-          xcodebuild build -workspace TestApp.xcworkspace -scheme TestApp -destination "platform=$platform,name=$device" | if command -v xcpretty &> /dev/null; then xcpretty; else cat; fi
+          xcodebuild build -workspace TestApp.xcworkspace -scheme TestApp -destination "platform=$platform,name=$device"

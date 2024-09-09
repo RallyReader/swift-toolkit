@@ -1,5 +1,5 @@
 //
-//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Copyright 2023 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
@@ -57,7 +57,6 @@ class EPUBSpreadView: UIView, Loggable, PageView {
     let animatedLoad: Bool
 
     weak var activityIndicatorView: UIActivityIndicatorView?
-    private var activityIndicatorStopWorkItem: DispatchWorkItem?
 
     private(set) var spreadLoaded = false
 
@@ -220,11 +219,6 @@ class EPUBSpreadView: UIView, Loggable, PageView {
         delegate?.spreadView(self, didTapAt: point)
     }
 
-    private func spreadLoadDidStart(_ body: Any) {
-        trace()
-        activityIndicatorStopWorkItem?.cancel()
-    }
-
     /// Called by the javascript code when the spread contents is fully loaded.
     /// The JS message `spreadLoaded` needs to be emitted by a subclass script, EPUBSpreadView's scripts don't.
     private func spreadDidLoad(_ body: Any) {
@@ -240,7 +234,6 @@ class EPUBSpreadView: UIView, Loggable, PageView {
     }
 
     func showSpread() {
-        trace()
         activityIndicatorView?.stopAnimating()
         UIView.animate(withDuration: animatedLoad ? 0.3 : 0, animations: {
             self.scrollView.alpha = 1
@@ -270,6 +263,14 @@ class EPUBSpreadView: UIView, Loggable, PageView {
         focusedResource = spread.links.first(withHREF: href)
         frame.origin = convertPointToNavigatorSpace(frame.origin)
         delegate?.spreadView(self, selectionDidChange: text, frame: frame)
+    }
+
+    /// Called when the user hit the Share item in the selection context menu.
+    @objc func shareSelection(_ sender: Any?) {
+        guard let shareViewController = viewModel.editingActions.makeShareViewController(from: webView) else {
+            return
+        }
+        delegate?.spreadView(self, present: shareViewController)
     }
 
     /// Update webview style to userSettings.
@@ -346,7 +347,6 @@ class EPUBSpreadView: UIView, Loggable, PageView {
         registerJSMessage(named: "log") { [weak self] in self?.didLog($0) }
         registerJSMessage(named: "logError") { [weak self] in self?.didLogError($0) }
         registerJSMessage(named: "tap") { [weak self] in self?.didTap($0) }
-        registerJSMessage(named: "spreadLoadStarted") { [weak self] in self?.spreadLoadDidStart($0) }
         registerJSMessage(named: "spreadLoaded") { [weak self] in self?.spreadDidLoad($0) }
         registerJSMessage(named: "selectionChanged") { [weak self] in self?.selectionDidChange($0) }
         registerJSMessage(named: "decorationActivated") { [weak self] in self?.decorationDidActivate($0) }
@@ -447,13 +447,8 @@ extension EPUBSpreadView: WKScriptMessageHandler {
 }
 
 extension EPUBSpreadView: WKNavigationDelegate {
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        log(.error, error)
-    }
-
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        trace()
-        setNeedsStopActivityIndicator()
+        // Do not remove: overridden in subclasses.
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
@@ -461,8 +456,9 @@ extension EPUBSpreadView: WKNavigationDelegate {
 
         if navigationAction.navigationType == .linkActivated {
             if let url = navigationAction.request.url {
+                let baseURL = viewModel.publicationBaseURL
                 // Check if url is internal or external
-                if let baseURL = viewModel.publicationBaseURL, url.host == baseURL.host {
+                if url.host == baseURL.host {
                     let href = url.absoluteString.replacingOccurrences(of: baseURL.absoluteString, with: "/")
                     delegate?.spreadView(self, didTapOnInternalLink: href, clickEvent: lastClick)
                 } else {
@@ -533,34 +529,6 @@ private extension EPUBSpreadView {
         view.centerYAnchor.constraint(equalTo: centerYAnchor).isActive = true
         view.startAnimating()
         activityIndicatorView = view
-    }
-
-    private func setNeedsStopActivityIndicator() {
-        guard activityIndicatorStopWorkItem == nil else {
-            return
-        }
-
-        activityIndicatorStopWorkItem = DispatchWorkItem { [weak self] in
-            defer {
-                self?.activityIndicatorStopWorkItem = nil
-            }
-
-            if self?.activityIndicatorStopWorkItem?.isCancelled ?? true {
-                return
-            }
-
-            self?.trace("stopping activity indicator because spread did not load")
-            self?.activityIndicatorView?.stopAnimating()
-        }
-
-        // If the spread doesn't begin loading within 1 sec it means that we
-        // likely encountered an error. In that case the work item we
-        // schedule below will stop the activity indicator.
-        // If the spread begins to load it will send a `spreadLoadStart` JS
-        // event which will cancel the work item being scheduled here.
-        trace("scheduling activity indicator stop")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1,
-                                      execute: activityIndicatorStopWorkItem!)
     }
 }
 
