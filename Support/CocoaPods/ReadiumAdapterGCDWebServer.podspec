@@ -1,12 +1,12 @@
 Pod::Spec.new do |s|
 
   s.name          = "ReadiumAdapterGCDWebServer"
-  s.version       = "2.6.0"
+  s.version       = "2.7.2"
   s.license       = "BSD 3-Clause License"
   s.summary       = "Adapter to use GCDWebServer as an HTTP server in Readium"
   s.homepage      = "http://readium.github.io"
   s.author        = { "Readium" => "contact@readium.org" }
-  s.source        = { :git => "https://github.com/readium/swift-toolkit.git", :tag => "2.6.0" }
+  s.source        = { :git => "https://github.com/readium/swift-toolkit.git", :tag => "2.7.2" }
   s.requires_arc  = true
   s.source_files  = "Sources/Adapters/GCDWebServer/**/*.{m,h,swift}"
   s.platform      = :ios
@@ -15,6 +15,6 @@ Pod::Spec.new do |s|
 
   s.dependency 'R2Shared'
   s.dependency 'ReadiumInternal'
-  s.dependency 'GCDWebServer', '~> 3.0'
+  s.dependency 'ReadiumGCDWebServer', '~> 4.0.0'
 
 end

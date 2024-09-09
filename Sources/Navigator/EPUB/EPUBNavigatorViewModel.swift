@@ -1,5 +1,5 @@
 //
-//  Copyright 2023 Readium Foundation. All rights reserved.
+//  Copyright 2024 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
@@ -11,6 +11,7 @@ import UIKit
 protocol EPUBNavigatorViewModelDelegate: AnyObject {
     func epubNavigatorViewModel(_ viewModel: EPUBNavigatorViewModel, runScript script: String, in scope: EPUBScriptScope)
     func epubNavigatorViewModelInvalidatePaginationView(_ viewModel: EPUBNavigatorViewModel)
+    func epubNavigatorViewModel(_ viewModel: EPUBNavigatorViewModel, didFailToLoadResourceAt href: String, withError error: ResourceError)
 }
 
 enum EPUBScriptScope {
@@ -29,7 +30,7 @@ final class EPUBNavigatorViewModel: Loggable {
     let editingActions: EditingActionsController
     private let httpServer: HTTPServer?
     private let publicationEndpoint: HTTPServerEndpoint?
-    let publicationBaseURL: URL
+    private(set) var publicationBaseURL: URL!
     let assetsURL: URL
     weak var delegate: EPUBNavigatorViewModelDelegate?
 
@@ -44,25 +45,19 @@ final class EPUBNavigatorViewModel: Loggable {
         config: EPUBNavigatorViewController.Configuration,
         httpServer: HTTPServer
     ) throws {
+        let uuidEndpoint: HTTPServerEndpoint = UUID().uuidString
         let publicationEndpoint: HTTPServerEndpoint?
-        let baseURL: URL
-        if let url = publication.baseURL {
+        if publication.baseURL != nil {
             publicationEndpoint = nil
-            baseURL = url
         } else {
-            let endpoint = UUID().uuidString
-            publicationEndpoint = endpoint
-            baseURL = try httpServer.serve(
-                at: endpoint,
-                publication: publication
-            )
+            publicationEndpoint = uuidEndpoint
         }
 
         // FIXME: Remove in Readium 3.0
         // Serve the fonts under the /fonts endpoint as the Streamer's
         // EPUBHTMLInjector is expecting it there.
         if let fontsURL = Bundle.module.resourceURL?.appendingPathComponent("Assets/Static/fonts") {
-            try httpServer.serve(at: "fonts", contentsOf: fontsURL)
+            try httpServer.serve(at: "fonts", contentsOf: fontsURL, failureHandler: nil)
         }
 
         try self.init(
@@ -70,13 +65,29 @@ final class EPUBNavigatorViewModel: Loggable {
             config: config,
             httpServer: httpServer,
             publicationEndpoint: publicationEndpoint,
-            publicationBaseURL: baseURL,
             assetsURL: httpServer.serve(
                 at: "readium",
-                contentsOf: Bundle.module.resourceURL!.appendingPathComponent("Assets/Static")
+                contentsOf: Bundle.module.resourceURL!.appendingPathComponent("Assets/Static"),
+                failureHandler: nil
             ),
             useLegacySettings: false
         )
+
+        if let url = publication.baseURL {
+            publicationBaseURL = url
+        } else {
+            publicationBaseURL = try httpServer.serve(
+                at: uuidEndpoint, // serving the chapters endpoint
+                publication: publication,
+                failureHandler: { [weak self] request, error in
+                    guard let self = self, let href = request.href else {
+                        return
+                    }
+                    self.delegate?.epubNavigatorViewModel(self, didFailToLoadResourceAt: href, withError: error)
+                }
+            )
+        }
+        publicationBaseURL = URL(string: publicationBaseURL.absoluteString.addingSuffix("/"))!
 
         if let endpoint = publicationEndpoint {
             httpServer.transformResources(at: endpoint) { [weak self] in
@@ -102,7 +113,6 @@ final class EPUBNavigatorViewModel: Loggable {
             config: config,
             httpServer: nil,
             publicationEndpoint: nil,
-            publicationBaseURL: baseURL,
             assetsURL: {
                 do {
                     return try resourcesServer.serve(
@@ -116,6 +126,8 @@ final class EPUBNavigatorViewModel: Loggable {
             }(),
             useLegacySettings: true
         )
+
+        publicationBaseURL = baseURL
     }
 
     private init(
@@ -123,7 +135,6 @@ final class EPUBNavigatorViewModel: Loggable {
         config: EPUBNavigatorViewController.Configuration,
         httpServer: HTTPServer?,
         publicationEndpoint: HTTPServerEndpoint?,
-        publicationBaseURL: URL,
         assetsURL: URL,
         useLegacySettings: Bool
     ) {
@@ -159,20 +170,16 @@ final class EPUBNavigatorViewModel: Loggable {
         self.config = config
         editingActions = EditingActionsController(
             actions: config.editingActions,
-            rights: publication.rights
+            publication: publication
         )
         self.httpServer = httpServer
         self.publicationEndpoint = publicationEndpoint
-        self.publicationBaseURL = URL(string: publicationBaseURL.absoluteString.addingSuffix("/"))!
         self.assetsURL = assetsURL
         self.useLegacySettings = useLegacySettings
         legacyReadingProgression = publication.metadata.effectiveReadingProgression
 
-        settings = EPUBSettings(
-            preferences: config.preferences,
-            defaults: config.defaults,
-            metadata: publication.metadata
-        )
+        preferences = config.preferences
+        settings = EPUBSettings(publication: publication, config: config)
 
         css = ReadiumCSS(
             layout: CSSLayout(),
@@ -182,9 +189,18 @@ final class EPUBNavigatorViewModel: Loggable {
         )
 
         css.update(with: settings)
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(voiceOverStatusDidChange),
+            name: UIAccessibility.voiceOverStatusDidChangeNotification,
+            object: nil
+        )
     }
 
     deinit {
+        NotificationCenter.default.removeObserver(self)
+
         if let endpoint = publicationEndpoint {
             httpServer?.remove(at: endpoint)
         }
@@ -203,7 +219,7 @@ final class EPUBNavigatorViewModel: Loggable {
             throw Error.noHTTPServer
         }
         let endpoint = baseEndpoint.addingSuffix("/") + file.lastPathComponent
-        let url = try httpServer.serve(at: endpoint, contentsOf: file)
+        let url = try httpServer.serve(at: endpoint, contentsOf: file, failureHandler: nil)
         $servedFiles.write { $0[file] = url }
         return url
     }
@@ -222,19 +238,27 @@ final class EPUBNavigatorViewModel: Loggable {
 
     // MARK: - User preferences
 
+    /// Currently applied settings.
     private(set) var settings: EPUBSettings
 
+    /// Last submitted preferences.
+    private var preferences: EPUBPreferences
+
     func submitPreferences(_ preferences: EPUBPreferences) {
+        self.preferences = preferences
+        applyPreferences()
+    }
+
+    private func applyPreferences() {
         let oldSettings = settings
         let newSettings = EPUBSettings(
             preferences: preferences,
-            defaults: config.defaults,
-            metadata: publication.metadata
+            publication: publication,
+            config: config
         )
+
         settings = newSettings
         updateSpread()
-        updateCSS(with: settings)
-        css.update(with: settings)
 
         let needsInvalidation: Bool =
             oldSettings.readingProgression != newSettings.readingProgression
@@ -242,6 +266,10 @@ final class EPUBNavigatorViewModel: Loggable {
                 || oldSettings.verticalText != newSettings.verticalText
                 || oldSettings.scroll != newSettings.scroll
                 || oldSettings.spread != newSettings.spread
+
+        // We don't commit the CSS changes if we invalidate the pagination, as
+        // the resources will be reloaded anyway.
+        updateCSS(with: settings, commitNow: !needsInvalidation)
 
         if needsInvalidation {
             setNeedsInvalidatePagination()
@@ -287,12 +315,7 @@ final class EPUBNavigatorViewModel: Loggable {
     }
 
     var scroll: Bool {
-        // Force-enables scroll when VoiceOver is running, because pagination
-        // breaks the screen reader.
-        guard !UIAccessibility.isVoiceOverRunning else {
-            return true
-        }
-        return useLegacySettings ? legacyScroll : settings.scroll
+        useLegacySettings ? legacyScroll : settings.scroll
     }
 
     private var legacyScroll: Bool {
@@ -381,19 +404,25 @@ final class EPUBNavigatorViewModel: Loggable {
         }
     }
 
-    private func updateCSS(with settings: EPUBSettings) {
-        let previousCSS = css
+    private func updateCSS(with settings: EPUBSettings, commitNow: Bool) {
+        let previous = css
         css.update(with: settings)
 
+        if commitNow {
+            commitCSSChange(from: previous, to: css)
+        }
+    }
+
+    private func commitCSSChange(from previous: ReadiumCSS, to new: ReadiumCSS) {
         var properties: [String: String?] = [:]
-        let rsProperties = css.rsProperties.cssProperties()
-        if previousCSS.rsProperties.cssProperties() != rsProperties {
+        let rsProperties = new.rsProperties.cssProperties()
+        if previous.rsProperties.cssProperties() != rsProperties {
             for (k, v) in rsProperties {
                 properties[k] = v
             }
         }
-        let userProperties = css.userProperties.cssProperties()
-        if previousCSS.userProperties.cssProperties() != userProperties {
+        let userProperties = new.userProperties.cssProperties()
+        if previous.userProperties.cssProperties() != userProperties {
             for (k, v) in userProperties {
                 properties[k] = v
             }
@@ -412,6 +441,41 @@ final class EPUBNavigatorViewModel: Loggable {
                 runScript: "readium.setCSSProperties(\(json));",
                 in: .loadedResources
             )
+        }
+    }
+
+    // MARK: - Accessibility
+
+    private var isVoiceOverRunning = UIAccessibility.isVoiceOverRunning
+
+    @objc private func voiceOverStatusDidChange() {
+        // Avoids excessive settings refresh when the status didn't change.
+        guard isVoiceOverRunning != UIAccessibility.isVoiceOverRunning else {
+            return
+        }
+        isVoiceOverRunning = UIAccessibility.isVoiceOverRunning
+
+        // Re-apply preferences to force the scroll mode if needed.
+        applyPreferences()
+    }
+}
+
+private extension EPUBSettings {
+    init(
+        preferences: EPUBPreferences? = nil,
+        publication: Publication,
+        config: EPUBNavigatorViewController.Configuration
+    ) {
+        self.init(
+            preferences: preferences ?? config.preferences,
+            defaults: config.defaults,
+            metadata: publication.metadata
+        )
+
+        // Force-enables scroll when VoiceOver is running, because pagination
+        // breaks the screen reader.
+        if UIAccessibility.isVoiceOverRunning {
+            scroll = true
         }
     }
 }

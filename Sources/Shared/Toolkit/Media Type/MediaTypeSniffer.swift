@@ -1,5 +1,5 @@
 //
-//  Copyright 2023 Readium Foundation. All rights reserved.
+//  Copyright 2024 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
@@ -102,7 +102,7 @@ public extension MediaType {
     /// You can register additional sniffers globally by modifying this list.
     /// The sniffers order is important, because some media types are subsets of other media types.
     static var sniffers: [Sniffer] = [
-        sniffHTML, sniffOPDS, sniffLCPLicense, sniffBitmap,
+        sniffHTML, sniffOPDS, sniffLCPLicense, sniffBitmap, sniffAudio,
         sniffWebPub, sniffW3CWPUB, sniffEPUB, sniffLPF, sniffArchive, sniffPDF,
     ]
 
@@ -293,24 +293,42 @@ public extension MediaType {
         return nil
     }
 
-    /// Authorized extensions for resources in a CBZ archive.
+    private static let bitmapExtensions = [
+        "bmp", "dib", "gif", "jif", "jfi", "jfif", "jpg", "jpeg", "png", "tif",
+        "tiff", "webp",
+    ]
+
+    private static let audioExtensions = [
+        "aac", "aiff", "alac", "flac", "m4a", "m4b", "mp3", "ogg", "oga",
+        "mogg", "opus", "wav", "webm",
+    ]
+
+    /// Required extensions for an archive to be considered a CBZ.
     /// Reference: https://wiki.mobileread.com/wiki/CBR_and_CBZ
-    private static let cbzExtensions = [
-        // bitmap
-        "bmp", "dib", "gif", "jif", "jfi", "jfif", "jpg", "jpeg", "png", "tif", "tiff", "webp",
+    private static let cbzRequiredExtensions = bitmapExtensions
+
+    /// Additional extensions authorized in a CBZ archive.
+    private static let cbzAllowedExtensions = [
         // metadata
         "acbf", "xml",
     ]
 
-    /// Authorized extensions for resources in a ZAB archive (Zipped Audio Book).
-    private static let zabExtensions = [
-        // audio
-        "aac", "aiff", "alac", "flac", "m4a", "m4b", "mp3", "ogg", "oga", "mogg", "opus", "wav", "webm",
-        // playlist
-        "asx", "bio", "m3u", "m3u8", "pla", "pls", "smil", "vlc", "wpl", "xspf", "zpl",
-    ]
+    /// Required extensions for an archive to be considered a ZAB (Zipped Audio Book).
+    private static let zabRequiredExtensions = audioExtensions
 
-    /// Sniffs a simple archive-based format, like Comic Book Archive or Zipped Audio Book.
+    /// Additional extensions authorized in a ZAB archive.
+    private static let zabAllowedExtensions = [
+        bitmapExtensions, // For covers
+        // playlist
+        [
+            "asx", "bio", "m3u", "m3u8", "pla", "pls", "smil", "vlc", "wpl",
+            "xspf", "zpl",
+        ],
+    ].flatMap { $0 }
+
+    /// Sniffs a simple archive-based format, like Comic Book Archive or Zipped
+    /// Audio Book.
+    ///
     /// Reference: https://wiki.mobileread.com/wiki/CBR_and_CBZ
     private static func sniffArchive(context: MediaTypeSnifferContext) -> MediaType? {
         if context.hasFileExtension("cbz") || context.hasMediaType("application/vnd.comicbook+zip", "application/x-cbz", "application/x-cbr") {
@@ -321,21 +339,17 @@ public extension MediaType {
         }
 
         if context.contentAsArchive != nil {
-            func isIgnored(_ url: URL) -> Bool {
-                let filename = url.lastPathComponent
-                return url.hasDirectoryPath || filename.hasPrefix(".") || filename == "Thumbs.db"
-            }
-
-            func archiveContainsOnlyExtensions(_ fileExtensions: [String]) -> Bool {
-                context.archiveEntriesAllSatisfy { url in
-                    isIgnored(url) || fileExtensions.contains(url.pathExtension.lowercased())
-                }
-            }
-
-            if archiveContainsOnlyExtensions(cbzExtensions) {
+            if context.archiveEntriesContains(
+                requiredExtensions: cbzRequiredExtensions,
+                allowedExtensions: cbzAllowedExtensions
+            ) {
                 return .cbz
             }
-            if archiveContainsOnlyExtensions(zabExtensions) {
+
+            if context.archiveEntriesContains(
+                requiredExtensions: zabRequiredExtensions,
+                allowedExtensions: zabAllowedExtensions
+            ) {
                 return .zab
             }
         }
@@ -374,6 +388,41 @@ public extension MediaType {
         }
         if context.hasFileExtension("webp") || context.hasMediaType("image/webp") {
             return .webp
+        }
+        return nil
+    }
+
+    /// Sniffs an audio clip.
+    private static func sniffAudio(context: MediaTypeSnifferContext) -> MediaType? {
+        if context.hasFileExtension("aac") || context.hasMediaType("audio/aac") {
+            return .aac
+        }
+        if context.hasFileExtension("aiff", "aif", "aifc") || context.hasMediaType("audio/aiff", "audio/x-aiff") {
+            return .aiff
+        }
+        if context.hasFileExtension("flac") || context.hasMediaType("audio/flac") {
+            return .flac
+        }
+        if context.hasFileExtension("mp3") {
+            return .mp3
+        }
+        if context.hasFileExtension("mp4", "m4a", "m4b", "m4p", "m4r", "alac") || context.hasMediaType("audio/mp4") {
+            return .mp4
+        }
+        if context.hasMediaType("audio/mpeg") {
+            return .mpegAudio
+        }
+        if context.hasFileExtension("ogg", "oga", "mogg") || context.hasMediaType("audio/ogg") {
+            return .ogg
+        }
+        if context.hasFileExtension("opus") || context.hasMediaType("audio/opus") {
+            return .opus
+        }
+        if context.hasFileExtension("wav", "wave") || context.hasMediaType("audio/wav", "audio/x-wav", "audio/wave") {
+            return .wav
+        }
+        if context.hasFileExtension("webm") || context.hasMediaType("audio/webm") {
+            return .webmAudio
         }
         return nil
     }

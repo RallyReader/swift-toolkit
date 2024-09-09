@@ -1,12 +1,12 @@
 Pod::Spec.new do |s|
 
   s.name          = "R2Streamer"
-  s.version       = "2.6.0"
+  s.version       = "2.7.2"
   s.license       = "BSD 3-Clause License"
   s.summary       = "R2 Streamer"
   s.homepage      = "http://readium.github.io"
   s.author        = { "Readium" => "contact@readium.org" }
-  s.source        = { :git => "https://github.com/readium/swift-toolkit.git", :tag => "2.6.0" }
+  s.source        = { :git => "https://github.com/readium/swift-toolkit.git", :tag => "2.7.2" }
   s.requires_arc  = true
   s.resource_bundles = {
     'ReadiumStreamer' => [
@@ -24,7 +24,7 @@ Pod::Spec.new do |s|
   s.dependency 'ReadiumInternal'
   s.dependency 'CryptoSwift', '<= 1.5.1' # From 1.6.0, the build fails in GitHub actions
   s.dependency 'Fuzi', '~> 3.0'
-  s.dependency 'GCDWebServer', '~> 3.0'
+  s.dependency 'ReadiumGCDWebServer', '~> 4.0.0'
   s.dependency 'Minizip', '~> 1.0'
 
 end
