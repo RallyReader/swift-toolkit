@@ -1290,6 +1290,11 @@ function registerTemplates(newStyles) {
     styleElement.innerHTML = stylesheet;
     document.getElementsByTagName("head")[0].appendChild(styleElement);
   }
+
+  // Append our containment style for the visible area
+  let containStyle = document.createElement("style");
+  containStyle.innerHTML = "\n    .visible-area {\n      contain: layout paint style;\n      position: relative;\n      width: 100%;\n      height: 100%;\n    }\n  ";
+  document.head.appendChild(containStyle);
 }
 
 /**
@@ -1382,6 +1387,21 @@ function DecorationGroup(groupId, groupName) {
     items.push(item);
     layout(item);
   }
+  function addEnhanced(decoration) {
+    let id = groupId + "-" + lastItemId++;
+    let range = (0,_utils__WEBPACK_IMPORTED_MODULE_1__.rangeFromLocator)(decoration.locator);
+    if (!range) {
+      (0,_utils__WEBPACK_IMPORTED_MODULE_1__.log)("Can't locate DOM range for decoration", decoration);
+      return;
+    }
+    let item = {
+      id,
+      decoration,
+      range
+    };
+    items.push(item);
+    layoutEnhanced(item, true);
+  }
 
   /**
    * Removes the decoration with given ID from the group.
@@ -1414,6 +1434,35 @@ function DecorationGroup(groupId, groupName) {
   function clear() {
     clearContainer();
     items.length = 0;
+  }
+
+  // function clearEnhanced() {
+  //   items.forEach((item) => {
+  //     item.clickableElements = null;
+  //     if (item.container) {
+  //       while (item.container.firstChild) {
+  //         item.container.removeChild(item.container.firstChild);
+  //       }
+  //       // item.container.remove();
+  //       // item.container = null;
+  //     }
+  //   });
+
+  //   items.length = 0;
+  // }
+
+  function clearEnhanced(decorationId) {
+    // Iterate over each item in the items array
+    (0,_utils__WEBPACK_IMPORTED_MODULE_1__.log)("trying to clear decorsation: ".concat(decorationId));
+    items.forEach(item => {
+      // Check if the item's decoration id matches the one we want to remove
+      if (item.decoration.id === decorationId && item.container) {
+        item.container.remove();
+      }
+    });
+
+    // Optionally, remove the item from the items array if you want to stop tracking it
+    items = items.filter(item => item.decoration.id !== decorationId);
   }
 
   /**
@@ -1513,6 +1562,97 @@ function DecorationGroup(groupId, groupName) {
       item.clickableElements = Array.from(itemContainer.children);
     }
   }
+  function layoutEnhanced(item, postMessage) {
+    let style = styles.get(item.decoration.style);
+    if (!style) {
+      (0,_utils__WEBPACK_IMPORTED_MODULE_1__.logErrorMessage)("Unknown decoration style: ".concat(item.decoration.style));
+      return;
+    }
+
+    // Get the bounding rect for the decoration
+    let boundingRect = item.range.getBoundingClientRect();
+
+    // Calculate which page (container) this decoration belongs to based on its left position
+    let viewportWidth = window.innerWidth;
+    let pageIndex = Math.floor((boundingRect.left + window.scrollX) / viewportWidth); // Calculate the page index
+
+    let visibleArea = applyContainmentToArea(pageIndex); // Get or create the container for this page
+
+    // Create the decoration element
+    let itemContainer = document.createElement("div");
+    itemContainer.setAttribute("id", item.id);
+    itemContainer.setAttribute("data-style", item.decoration.style);
+    itemContainer.style.setProperty("pointer-events", "none");
+
+    // Adjust the position of the decoration relative to the container (page)
+    let xOffset = boundingRect.left - pageIndex * viewportWidth + window.scrollX; // Relative position within the page
+    // let yOffset = boundingRect.top + window.scrollY;
+
+    (0,_utils__WEBPACK_IMPORTED_MODULE_1__.log)("visible area :: bounding rect left: ".concat(boundingRect.left));
+    (0,_utils__WEBPACK_IMPORTED_MODULE_1__.log)("visible area :: page index: ".concat(pageIndex));
+    (0,_utils__WEBPACK_IMPORTED_MODULE_1__.log)("visible area :: viewport width: ".concat(viewportWidth));
+    (0,_utils__WEBPACK_IMPORTED_MODULE_1__.log)("visible area :: window screen x: ".concat(window.scrollX));
+
+    // Position the decoration element inside the page container
+    function positionElement(element, rect, boundingRect) {
+      element.style.position = "absolute";
+      if (style.width === "wrap") {
+        element.style.width = "".concat(rect.width, "px");
+        element.style.height = "".concat(rect.height, "px");
+        element.style.left = "".concat(xOffset, "px"); // Position within the page
+        element.style.top = "".concat(rect.top + window.scrollY, "px");
+      } else if (style.width === "viewport") {
+        element.style.width = "".concat(viewportWidth, "px");
+        element.style.height = "".concat(rect.height, "px");
+        element.style.left = "".concat(xOffset, "px"); // Position within the page
+        element.style.top = "".concat(rect.top + window.scrollY, "px");
+      } else if (style.width === "bounds") {
+        element.style.width = "".concat(boundingRect.width, "px");
+        element.style.height = "".concat(rect.height, "px");
+        element.style.left = "".concat(boundingRect.left + xOffset, "px");
+        element.style.top = "".concat(rect.top + window.scrollY, "px");
+      } else if (style.width === "page") {
+        element.style.width = "".concat(viewportWidth, "px");
+        element.style.height = "".concat(rect.height, "px");
+        element.style.left = "".concat(xOffset, "px");
+        element.style.top = "".concat(rect.top + window.scrollY, "px");
+      }
+    }
+    let elementTemplate;
+    try {
+      let template = document.createElement("template");
+      template.innerHTML = item.decoration.element.trim();
+      elementTemplate = template.content.firstElementChild;
+    } catch (error) {
+      (0,_utils__WEBPACK_IMPORTED_MODULE_1__.logErrorMessage)("Invalid decoration element \"".concat(item.decoration.element, "\": ").concat(error.message));
+      return;
+    }
+    if (style.layout === "boxes") {
+      let clientRects = (0,_rect__WEBPACK_IMPORTED_MODULE_0__.getClientRectsNoOverlap)(item.range, true);
+      clientRects.forEach(clientRect => {
+        const line = elementTemplate.cloneNode(true);
+        line.style.setProperty("pointer-events", "none");
+        positionElement(line, clientRect, boundingRect);
+        itemContainer.append(line);
+      });
+    } else if (style.layout === "bounds") {
+      const bounds = elementTemplate.cloneNode(true);
+      bounds.style.setProperty("pointer-events", "none");
+      positionElement(bounds, boundingRect, boundingRect);
+      itemContainer.append(bounds);
+    }
+
+    // Add the decoration to the corresponding visible area container (page)
+    visibleArea.append(itemContainer);
+    item.container = itemContainer;
+    if (postMessage) {
+      webkit.messageHandlers.decorationRect.postMessage({
+        id: item.decoration.id,
+        group: groupName,
+        rect: (0,_rect__WEBPACK_IMPORTED_MODULE_0__.toNativeRect)(boundingRect)
+      });
+    }
+  }
 
   /**
    * Returns the group container element, after making sure it exists.
@@ -1531,6 +1671,28 @@ function DecorationGroup(groupId, groupName) {
     }
     return container;
   }
+  function applyContainmentToArea(pageIndex) {
+    let viewportWidth = window.innerWidth;
+    let visibleAreaLeft = pageIndex * viewportWidth; // Each page is one viewport width in size
+    let visibleAreaId = "visible-area-".concat(pageIndex);
+
+    // Check if the visible area for this page already exists
+    let visibleArea = document.querySelector("#".concat(visibleAreaId));
+    if (!visibleArea) {
+      // Create a new container for the visible area (this page)
+      visibleArea = document.createElement("div");
+      visibleArea.classList.add("visible-area");
+      visibleArea.setAttribute("id", visibleAreaId);
+      visibleArea.style.position = "absolute";
+      visibleArea.style.left = "".concat(visibleAreaLeft, "px");
+      visibleArea.style.top = "0";
+      visibleArea.style.width = "".concat(viewportWidth, "px");
+      visibleArea.style.height = "".concat(window.innerHeight, "px");
+      visibleArea.style.pointerEvents = "none"; // Allow interactions to pass through
+      document.body.appendChild(visibleArea);
+    }
+    return visibleArea;
+  }
 
   /**
    * Removes the group container.
@@ -1543,9 +1705,11 @@ function DecorationGroup(groupId, groupName) {
   }
   return {
     add,
+    addEnhanced,
     remove,
     update,
     clear,
+    clearEnhanced,
     items,
     requestLayout,
     isActivable,

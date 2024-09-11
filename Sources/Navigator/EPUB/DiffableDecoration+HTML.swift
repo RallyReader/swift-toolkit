@@ -47,6 +47,9 @@ extension DecorationChange {
         case let .add(decoration):
             return serializeJSON(of: decoration)
                 .map { "group.add(\($0));" }
+        case let .addEnhanced(decoration):
+            return serializeJSON(of: decoration)
+                .map { "group.addEnhanced(\($0));" }
         case let .remove(identifier):
             return "group.remove('\(identifier)');"
         case let .update(decoration):
