@@ -15,6 +15,7 @@ struct DiffableDecoration: Hashable, Differentiable {
 
 enum DecorationChange {
     case add(Decoration)
+    case addEnhanced(Decoration)
     case remove(Decoration.Id)
     case update(Decoration)
 }

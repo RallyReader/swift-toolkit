@@ -889,12 +889,14 @@ open class EPUBNavigatorViewController: UIViewController,
 
     /// Decoration group callbacks, indexed by the group name.
     private var decorationCallbacks: [String: [DecorableNavigator.OnActivatedCallback]] = [:]
+    
+    private var decorationRectsCallbacks: [String: [DecorableNavigator.OnRectCalculatedCallback]] = [:]
 
     public func supports(decorationStyle style: Decoration.Style.Id) -> Bool {
         config.decorationTemplates.keys.contains(style)
     }
 
-    public func apply(decorations: [Decoration], in group: String) {
+    public func apply(decorations: [Decoration], enhanced: Bool = false, in group: String) {
         let source = self.decorations[group] ?? []
         let target = decorations.map { DiffableDecoration(decoration: $0) }
 
@@ -902,11 +904,12 @@ open class EPUBNavigatorViewController: UIViewController,
 
         if decorations.isEmpty {
             for (_, pageView) in paginationView.loadedViews {
+                let script = enhanced ? "requestAnimationFrame(function () { readium.getDecorations('\(group)').clearEnhanced(); });" : "requestAnimationFrame(function () { readium.getDecorations('\(group)').clear(); });"
                 (pageView as? EPUBSpreadView)?.evaluateScript(
                     // The updates command are using `requestAnimationFrame()`, so we need it for
                     // `clear()` as well otherwise we might recreate a highlight after it has been
                     // cleared.
-                    "requestAnimationFrame(function () { readium.getDecorations('\(group)').clear(); });"
+                    script
                 )
             }
 
@@ -920,14 +923,23 @@ open class EPUBNavigatorViewController: UIViewController,
         }
     }
     
-    public func addDecorations(decorations: [Decoration], in group: String, completion: @escaping () -> Void) {
+    public func remove(decoration: Decoration, in group: String) {
+        var decorationsIsGroup = self.decorations[group]
+        decorationsIsGroup?.removeAll(where: {$0.decoration.id == decoration.id})
+        self.decorations[group] = decorationsIsGroup
+        
+        let script = "requestAnimationFrame(function () { readium.getDecorations('\(group)').clearEnhanced('\(decoration.id)'); });"
+        self.loadedSpreadView(forHREF: decoration.locator.href)?.evaluateScript(script)
+    }
+    
+    public func addDecorations(decorations: [Decoration], enhanced: Bool, in group: String, completion: @escaping () -> Void) {
         let date = Date()
         let source = self.decorations[group] ?? []
         let target = decorations.map { DiffableDecoration(decoration: $0) }
         
         self.decorations[group]?.append(contentsOf: target)
         
-        let decorationChanges = decorations.map {DecorationChange.add($0)}
+        let decorationChanges = decorations.map {enhanced ? DecorationChange.addEnhanced($0) : DecorationChange.add($0)}
         
         if let script = decorationChanges.javascript(forGroup: group, styles: config.decorationTemplates) {
             self.loadedSpreadView(forHREF: decorations[0].locator.href)?.evaluateScript(script, inHREF: decorations[0].locator.href) { _ in
@@ -945,6 +957,19 @@ open class EPUBNavigatorViewController: UIViewController,
         var callbacks = decorationCallbacks[group] ?? []
         callbacks.append(onActivated)
         decorationCallbacks[group] = callbacks
+
+        for (_, view) in paginationView.loadedViews {
+            (view as? EPUBSpreadView)?.evaluateScript("readium.getDecorations('\(group)').setActivable();")
+        }
+    }
+    
+    public func observeDecorationRectCalculations(inGroup group: String, onActivated: OnRectCalculatedCallback?) {
+        guard let onActivated = onActivated else {
+            return
+        }
+        var callbacks = decorationRectsCallbacks[group] ?? []
+        callbacks.append(onActivated)
+        decorationRectsCallbacks[group] = callbacks
 
         for (_, view) in paginationView.loadedViews {
             (view as? EPUBSpreadView)?.evaluateScript("readium.getDecorations('\(group)').setActivable();")
@@ -1225,6 +1250,21 @@ extension EPUBNavigatorViewController: EPUBSpreadViewDelegate {
 
         for callback in callbacks {
             callback(OnDecorationActivatedEvent(decoration: decoration, group: group, rect: frame, point: point))
+        }
+    }
+    
+    func spreadView(_ spreadView: EPUBSpreadView, didCalculateDecorationRect id: Decoration.Id, inGroup group: String, frame: CGRect?) {
+        guard
+            let callbacks = decorationRectsCallbacks[group].takeIf({ !$0.isEmpty }),
+            let decoration: Decoration = decorations[group]?
+            .first(where: { $0.decoration.id == id })
+            .map(\.decoration)
+        else {
+            return
+        }
+
+        for callback in callbacks {
+            callback(OnDecorationRectEvent(decoration: decoration, group: group, rect: frame))
         }
     }
 

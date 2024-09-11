@@ -23,6 +23,9 @@ protocol EPUBSpreadViewDelegate: AnyObject {
 
     /// Called when the user tapped on a decoration.
     func spreadView(_ spreadView: EPUBSpreadView, didActivateDecoration id: Decoration.Id, inGroup group: String, frame: CGRect?, point: CGPoint?)
+    
+    /// Called when a decoration rect is calculated
+    func spreadView(_ spreadView: EPUBSpreadView, didCalculateDecorationRect id: Decoration.Id, inGroup group: String, frame: CGRect?)
 
     /// Called when the text selection changes.
     func spreadView(_ spreadView: EPUBSpreadView, selectionDidChange text: Locator.Text?, frame: CGRect)
@@ -350,6 +353,7 @@ class EPUBSpreadView: UIView, Loggable, PageView {
         registerJSMessage(named: "spreadLoaded") { [weak self] in self?.spreadDidLoad($0) }
         registerJSMessage(named: "selectionChanged") { [weak self] in self?.selectionDidChange($0) }
         registerJSMessage(named: "decorationActivated") { [weak self] in self?.decorationDidActivate($0) }
+        registerJSMessage(named: "decorationRect") { [weak self] in self?.decorationRect($0) }
         registerJSMessage(named: "pressKey") { [weak self] in self?.didPressKey($0) }
     }
 
@@ -410,6 +414,22 @@ class EPUBSpreadView: UIView, Loggable, PageView {
         let point = ClickEvent(json: decoration["click"])
             .map { convertPointToNavigatorSpace($0.point) }
         delegate?.spreadView(self, didActivateDecoration: decorationId, inGroup: groupName, frame: frame, point: point)
+    }
+    
+    /// Called by the JavaScript layer when the user activates a decoration.
+    private func decorationRect(_ body: Any) {
+        guard
+            let decoration = body as? [String: Any],
+            let decorationId = decoration["id"] as? Decoration.Id,
+            let groupName = decoration["group"] as? String,
+            var frame = CGRect(json: decoration["rect"])
+        else {
+            log(.warning, "Invalid body for decorationDidActivate: \(body)")
+            return
+        }
+
+        frame = convertRectToNavigatorSpace(frame)
+        delegate?.spreadView(self, didCalculateDecorationRect: decorationId, inGroup: groupName, frame: frame)
     }
 
     // MARK: - Accessibility
