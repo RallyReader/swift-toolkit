@@ -288,6 +288,9 @@ export function calculateHorizontalPageRanges() {
     ) {
       processText = true;
       rect = element.getBoundingClientRect();
+    } else if (element.nodeName === "br") {
+      log(`adding br as new line`);
+      addTextToRange("\n", rangeIndex);
     }
 
     if (processText) {
