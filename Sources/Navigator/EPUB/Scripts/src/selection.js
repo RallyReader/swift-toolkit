@@ -84,6 +84,10 @@ function getCurrentSelectionText() {
     return undefined;
   }
 
+  return getTextFrom(highlight, range);
+}
+
+export function getTextFrom(highlight, range) {
   // Generate the text by traversing the document and replacing <br> with \n
   let node = document.body.firstChild;
   let fullText = "";
