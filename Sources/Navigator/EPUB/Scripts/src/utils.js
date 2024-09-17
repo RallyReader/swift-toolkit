@@ -466,6 +466,18 @@ export function calculateHorizontalPageRanges() {
 
   function processNode(node) {
     // log("process node <" + node.textContent + ">");
+    log(`process node with name : ${node.nodeName} and type: ${node.nodeType}`);
+    const keys = Object.keys(rangeData);
+
+    if (node.nodeName === "p" && keys.length > 0) {
+      const lastKey = keys[keys.length - 1];
+      const lastItem = rangeData[lastKey];
+      if (lastItem.endsWith(`\n`) === false) {
+        log(`appending new line before paragraph`);
+        addTextToRange("\n", rangeIndex);
+      }
+    }
+
     if (node.childNodes.length > 1) {
       let child = node.firstChild;
       while (child) {
