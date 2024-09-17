@@ -7,7 +7,7 @@
 // Catch JS errors to log them in the app.
 
 import { TextQuoteAnchor } from "./vendor/hypothesis/anchoring/types";
-import { getCurrentSelection } from "./selection";
+import { getCurrentSelection, getTextFrom } from "./selection";
 import { getClientRectsNoOverlap, toNativeRect } from "./rect";
 
 /**
@@ -711,6 +711,65 @@ export function rangeFromLocator(locator) {
   }
 
   return null;
+}
+
+export function getFirstVisibleWordText() {
+  const range = document.createRange();
+  const nodeIterator = document.createNodeIterator(
+    document.body,
+    NodeFilter.SHOW_TEXT,
+    {
+      acceptNode: function (node) {
+        // Only accept text nodes that are not empty
+        if (node.nodeValue.trim().length > 0) {
+          range.selectNodeContents(node);
+          const rect = range.getBoundingClientRect();
+
+          // Check if any part of the rect is within the viewport (horizontal and vertical)
+          if (
+            rect.right > 0 &&
+            rect.left < window.innerWidth &&
+            rect.bottom > 0 &&
+            rect.top < window.innerHeight
+          ) {
+            return NodeFilter.FILTER_ACCEPT;
+          }
+        }
+        return NodeFilter.FILTER_REJECT;
+      },
+    }
+  );
+
+  let documentNode;
+  while ((documentNode = nodeIterator.nextNode())) {
+    const words = documentNode.nodeValue.trim().split(/\s+/);
+    if (words.length > 0) {
+      // Loop through each word to find the first visible word within the viewport
+      for (let i = 0; i < words.length; i++) {
+        const wordIndex = documentNode.nodeValue.indexOf(words[i]);
+
+        // Create a range for each word
+        const wordRange = document.createRange();
+        wordRange.setStart(documentNode, wordIndex);
+        wordRange.setEnd(documentNode, wordIndex + words[i].length);
+
+        const wordRect = wordRange.getBoundingClientRect();
+
+        // Check if the word is within the current viewport
+        if (
+          wordRect.right > 0 &&
+          wordRect.left < window.innerWidth &&
+          wordRect.bottom > 0 &&
+          wordRect.top < window.innerHeight
+        ) {
+          // Return the locator for the first visible word
+          return { text: getTextFrom(words[i], wordRange) };
+        }
+      }
+    }
+  }
+
+  return null; // Return null if no visible word is found
 }
 
 /// User Settings.

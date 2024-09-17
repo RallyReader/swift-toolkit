@@ -1977,6 +1977,7 @@ __webpack_require__.g.readium = {
   rectFromLocator: _utils__WEBPACK_IMPORTED_MODULE_3__.rectFromLocator,
   clientRectFromLocator: _utils__WEBPACK_IMPORTED_MODULE_3__.clientRectFromLocator,
   calculateHorizontalPageRanges: _utils__WEBPACK_IMPORTED_MODULE_3__.calculateHorizontalPageRanges,
+  getFirstVisibleWordText: _utils__WEBPACK_IMPORTED_MODULE_3__.getFirstVisibleWordText,
   // decoration
   registerDecorationTemplates: _decorator__WEBPACK_IMPORTED_MODULE_4__.registerTemplates,
   getDecorations: _decorator__WEBPACK_IMPORTED_MODULE_4__.getDecorations,
@@ -2359,6 +2360,7 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
 /* harmony export */   convertRangeInfo: () => (/* binding */ convertRangeInfo),
 /* harmony export */   getCurrentSelection: () => (/* binding */ getCurrentSelection),
+/* harmony export */   getTextFrom: () => (/* binding */ getTextFrom),
 /* harmony export */   location2RangeInfo: () => (/* binding */ location2RangeInfo)
 /* harmony export */ });
 /* harmony import */ var _utils__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./utils */ "./src/utils.js");
@@ -2435,7 +2437,9 @@ function getCurrentSelectionText() {
     log("$$$$$$$$$$$$$$$$$ CANNOT GET NON-COLLAPSED SELECTION RANGE?!");
     return undefined;
   }
-
+  return getTextFrom(highlight, range);
+}
+function getTextFrom(highlight, range) {
   // Generate the text by traversing the document and replacing <br> with \n
   let node = document.body.firstChild;
   let fullText = "";
@@ -2614,6 +2618,7 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */   calculateHorizontalPageRanges: () => (/* binding */ calculateHorizontalPageRanges),
 /* harmony export */   clientRectFromLocator: () => (/* binding */ clientRectFromLocator),
 /* harmony export */   getColumnCountPerScreen: () => (/* binding */ getColumnCountPerScreen),
+/* harmony export */   getFirstVisibleWordText: () => (/* binding */ getFirstVisibleWordText),
 /* harmony export */   isScrollModeEnabled: () => (/* binding */ isScrollModeEnabled),
 /* harmony export */   log: () => (/* binding */ log),
 /* harmony export */   logError: () => (/* binding */ logError),
@@ -3218,6 +3223,49 @@ function rangeFromLocator(locator) {
     logError(e);
   }
   return null;
+}
+function getFirstVisibleWordText() {
+  const range = document.createRange();
+  const nodeIterator = document.createNodeIterator(document.body, NodeFilter.SHOW_TEXT, {
+    acceptNode: function (node) {
+      // Only accept text nodes that are not empty
+      if (node.nodeValue.trim().length > 0) {
+        range.selectNodeContents(node);
+        const rect = range.getBoundingClientRect();
+
+        // Check if any part of the rect is within the viewport (horizontal and vertical)
+        if (rect.right > 0 && rect.left < window.innerWidth && rect.bottom > 0 && rect.top < window.innerHeight) {
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      }
+      return NodeFilter.FILTER_REJECT;
+    }
+  });
+  let documentNode;
+  while (documentNode = nodeIterator.nextNode()) {
+    const words = documentNode.nodeValue.trim().split(/\s+/);
+    if (words.length > 0) {
+      // Loop through each word to find the first visible word within the viewport
+      for (let i = 0; i < words.length; i++) {
+        const wordIndex = documentNode.nodeValue.indexOf(words[i]);
+
+        // Create a range for each word
+        const wordRange = document.createRange();
+        wordRange.setStart(documentNode, wordIndex);
+        wordRange.setEnd(documentNode, wordIndex + words[i].length);
+        const wordRect = wordRange.getBoundingClientRect();
+
+        // Check if the word is within the current viewport
+        if (wordRect.right > 0 && wordRect.left < window.innerWidth && wordRect.bottom > 0 && wordRect.top < window.innerHeight) {
+          // Return the locator for the first visible word
+          return {
+            text: (0,_selection__WEBPACK_IMPORTED_MODULE_1__.getTextFrom)(words[i], wordRange)
+          };
+        }
+      }
+    }
+  }
+  return null; // Return null if no visible word is found
 }
 
 /// User Settings.
