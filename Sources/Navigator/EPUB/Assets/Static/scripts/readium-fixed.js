@@ -1693,7 +1693,7 @@ function DecorationGroup(groupId, groupName) {
     let viewportWidth = window.innerWidth;
     let visibleAreaLeft = pageIndex * viewportWidth; // Each page is one viewport width in size
     let visibleAreaId = "visible-area-".concat(pageIndex);
-    const yOffset = window.innerHeight - document.documentElement.scrollHeight;
+    const yOffset = 0; //window.innerHeight - document.documentElement.scrollHeight;
 
     // Check if the visible area for this page already exists
     let visibleArea = document.querySelector("#".concat(visibleAreaId));
@@ -1710,10 +1710,16 @@ function DecorationGroup(groupId, groupName) {
       visibleArea.style.pointerEvents = "none"; // Allow interactions to pass through
       document.body.appendChild(visibleArea);
     }
-    if (visibleArea.style.top != 0 && yOffset != 0 && visibleArea.style.top != yOffset) {
-      (0,_utils__WEBPACK_IMPORTED_MODULE_1__.log)("window top offset: ".concat(yOffset));
-      visibleArea.style.top = "".concat(yOffset, "px");
-    }
+
+    // if (
+    //   visibleArea.style.top != 0 &&
+    //   yOffset != 0 &&
+    //   visibleArea.style.top != yOffset
+    // ) {
+    //   log(`window top offset: ${yOffset}`);
+    //   visibleArea.style.top = `${yOffset}px`;
+    // }
+
     return visibleArea;
   }
 
@@ -2442,7 +2448,7 @@ function getCurrentSelectionText() {
   }
   function processNode(node) {
     if (node.nodeName === "p") {
-      if (fullText.endsWith("\n") === false) {
+      if (!/\s$/.test(fullText)) {
         log("appending new line before paragraph");
         fullText += "\n";
       }
@@ -3019,7 +3025,7 @@ function calculateHorizontalPageRanges() {
     if (node.nodeName === "p" && keys.length > 0) {
       const lastKey = keys[keys.length - 1];
       const lastItem = rangeData[lastKey];
-      if (lastItem.endsWith("\n") === false) {
+      if (!/\s$/.test(lastItem)) {
         log("appending new line before paragraph");
         addTextToRange("\n", rangeIndex);
       }

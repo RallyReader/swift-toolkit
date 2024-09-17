@@ -472,7 +472,7 @@ export function calculateHorizontalPageRanges() {
     if (node.nodeName === "p" && keys.length > 0) {
       const lastKey = keys[keys.length - 1];
       const lastItem = rangeData[lastKey];
-      if (lastItem.endsWith(`\n`) === false) {
+      if (!/\s$/.test(lastItem)) {
         log(`appending new line before paragraph`);
         addTextToRange("\n", rangeIndex);
       }
