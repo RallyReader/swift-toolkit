@@ -98,7 +98,7 @@ function getCurrentSelectionText() {
 
   function processNode(node) {
     if (node.nodeName === "p") {
-      if (fullText.endsWith(`\n`) === false) {
+      if (!/\s$/.test(fullText)) {
         log(`appending new line before paragraph`);
         fullText += "\n";
       }
