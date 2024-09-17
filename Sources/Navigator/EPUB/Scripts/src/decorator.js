@@ -45,7 +45,7 @@ export function registerTemplates(newStyles) {
   containStyle.innerHTML = `
     .visible-area {
       contain: layout paint style;
-      position: relative;
+      position: absolute;
       width: 100%;
       height: 100%;
     }
@@ -365,39 +365,46 @@ export function DecorationGroup(groupId, groupName) {
     itemContainer.style.setProperty("pointer-events", "none");
 
     // Adjust the position of the decoration relative to the container (page)
-    let xOffset =
-      boundingRect.left - pageIndex * viewportWidth + window.scrollX; // Relative position within the page
+    // let xOffset =
+    //   boundingRect.left - pageIndex * viewportWidth + window.scrollX; // Relative position within the page
+    let xOffset = window.scrollX - pageIndex * viewportWidth;
     // let yOffset = boundingRect.top + window.scrollY;
+
+    let scrollingElement = document.scrollingElement;
+    let yOffset = scrollingElement.scrollTop;
 
     log(`visible area :: bounding rect left: ${boundingRect.left}`);
     log(`visible area :: page index: ${pageIndex}`);
     log(`visible area :: viewport width: ${viewportWidth}`);
     log(`visible area :: window screen x: ${window.scrollX}`);
 
+    log(`yoffset: ${yOffset}`);
+
     // Position the decoration element inside the page container
     function positionElement(element, rect, boundingRect) {
       element.style.position = "absolute";
-
+      log(`style width: ${style.width}`);
+      log(`rect left: ${rect.left}`);
       if (style.width === "wrap") {
         element.style.width = `${rect.width}px`;
         element.style.height = `${rect.height}px`;
-        element.style.left = `${xOffset}px`; // Position within the page
-        element.style.top = `${rect.top + window.scrollY}px`;
+        element.style.left = `${rect.left + xOffset}px`; // Position within the page
+        element.style.top = `${rect.top + yOffset}px`;
       } else if (style.width === "viewport") {
         element.style.width = `${viewportWidth}px`;
         element.style.height = `${rect.height}px`;
         element.style.left = `${xOffset}px`; // Position within the page
-        element.style.top = `${rect.top + window.scrollY}px`;
+        element.style.top = `${rect.top + yOffset}px`;
       } else if (style.width === "bounds") {
         element.style.width = `${boundingRect.width}px`;
         element.style.height = `${rect.height}px`;
         element.style.left = `${boundingRect.left + xOffset}px`;
-        element.style.top = `${rect.top + window.scrollY}px`;
+        element.style.top = `${rect.top + yOffset}px`;
       } else if (style.width === "page") {
         element.style.width = `${viewportWidth}px`;
         element.style.height = `${rect.height}px`;
         element.style.left = `${xOffset}px`;
-        element.style.top = `${rect.top + window.scrollY}px`;
+        element.style.top = `${rect.top + yOffset}px`;
       }
     }
 
@@ -413,19 +420,36 @@ export function DecorationGroup(groupId, groupName) {
       return;
     }
 
-    if (style.layout === "boxes") {
-      let clientRects = getClientRectsNoOverlap(item.range, true);
+    log(`style layout: ${style.layout}`);
 
-      clientRects.forEach((clientRect) => {
+    if (style.layout === "boxes") {
+      let doNotMergeHorizontallyAlignedRects = true;
+      let clientRects = getClientRectsNoOverlap(
+        item.range,
+        doNotMergeHorizontallyAlignedRects
+      );
+
+      clientRects = clientRects.sort((r1, r2) => {
+        if (r1.top < r2.top) {
+          return -1;
+        } else if (r1.top > r2.top) {
+          return 1;
+        } else {
+          return 0;
+        }
+      });
+
+      for (let clientRect of clientRects) {
         const line = elementTemplate.cloneNode(true);
         line.style.setProperty("pointer-events", "none");
         positionElement(line, clientRect, boundingRect);
         itemContainer.append(line);
-      });
+      }
     } else if (style.layout === "bounds") {
       const bounds = elementTemplate.cloneNode(true);
       bounds.style.setProperty("pointer-events", "none");
       positionElement(bounds, boundingRect, boundingRect);
+
       itemContainer.append(bounds);
     }
 
@@ -466,6 +490,8 @@ export function DecorationGroup(groupId, groupName) {
     let visibleAreaLeft = pageIndex * viewportWidth; // Each page is one viewport width in size
     let visibleAreaId = `visible-area-${pageIndex}`;
 
+    const yOffset = window.innerHeight - document.documentElement.scrollHeight;
+
     // Check if the visible area for this page already exists
     let visibleArea = document.querySelector(`#${visibleAreaId}`);
     if (!visibleArea) {
@@ -475,11 +501,20 @@ export function DecorationGroup(groupId, groupName) {
       visibleArea.setAttribute("id", visibleAreaId);
       visibleArea.style.position = "absolute";
       visibleArea.style.left = `${visibleAreaLeft}px`;
-      visibleArea.style.top = "0";
+      visibleArea.style.top = `${yOffset}px`;
       visibleArea.style.width = `${viewportWidth}px`;
       visibleArea.style.height = `${window.innerHeight}px`;
       visibleArea.style.pointerEvents = "none"; // Allow interactions to pass through
       document.body.appendChild(visibleArea);
+    }
+
+    if (
+      visibleArea.style.top != 0 &&
+      yOffset != 0 &&
+      visibleArea.style.top != yOffset
+    ) {
+      log(`window top offset: ${yOffset}`);
+      visibleArea.style.top = `${yOffset}px`;
     }
 
     return visibleArea;
