@@ -490,7 +490,14 @@ export function DecorationGroup(groupId, groupName) {
     let visibleAreaLeft = pageIndex * viewportWidth; // Each page is one viewport width in size
     let visibleAreaId = `visible-area-${pageIndex}`;
 
-    const yOffset = 0; //window.innerHeight - document.documentElement.scrollHeight;
+    //const yOffset = 0; //window.innerHeight - document.documentElement.scrollHeight;
+    let yOffset = window.innerHeight - document.documentElement.scrollHeight;
+
+    log(`yoffset: ${yOffset}`);
+
+    if (yOffset < -100) {
+      yOffset = 0;
+    }
 
     // Check if the visible area for this page already exists
     let visibleArea = document.querySelector(`#${visibleAreaId}`);
@@ -508,14 +515,14 @@ export function DecorationGroup(groupId, groupName) {
       document.body.appendChild(visibleArea);
     }
 
-    // if (
-    //   visibleArea.style.top != 0 &&
-    //   yOffset != 0 &&
-    //   visibleArea.style.top != yOffset
-    // ) {
-    //   log(`window top offset: ${yOffset}`);
-    //   visibleArea.style.top = `${yOffset}px`;
-    // }
+    if (
+      visibleArea.style.top != 0 &&
+      yOffset != 0 &&
+      visibleArea.style.top != yOffset
+    ) {
+      log(`window top offset: ${yOffset}`);
+      visibleArea.style.top = `${yOffset}px`;
+    }
 
     return visibleArea;
   }
