@@ -465,8 +465,23 @@ export function calculateHorizontalPageRanges() {
   }
 
   function processNode(node) {
-    // log("process node <" + node.textContent + ">");
     log(`process node with name : ${node.nodeName} and type: ${node.nodeType}`);
+
+    // Disabling this until we find a way to integrate this in the app;
+
+    // if (node.nodeType === Node.ELEMENT_NODE && node.textContent.length > 0) {
+    //   // Check the opacity of the element
+    //   let computedStyle = window.getComputedStyle(node);
+    //   let opacity = computedStyle.opacity;
+
+    //   if (opacity === "0") {
+    //     log(`Element has opacity 0, skipping processing: ${node.textContent}`);
+    //     return;
+    //   }
+    // }
+
+    // log("process node <" + node.textContent + ">");
+
     const keys = Object.keys(rangeData);
 
     if (node.nodeName === "p" && keys.length > 0) {

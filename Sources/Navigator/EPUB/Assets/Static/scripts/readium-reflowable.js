@@ -2432,6 +2432,14 @@ function getCurrentSelectionText() {
   if (!selection.anchorNode || !selection.focusNode) {
     return undefined;
   }
+  const range0 = window.getSelection().getRangeAt(0);
+  const element = range0.commonAncestorContainer.nodeType === 1 ? range0.commonAncestorContainer : range0.commonAncestorContainer.parentElement;
+  const style = window.getComputedStyle(element);
+  log("opacity: ".concat(style.opacity));
+  if (Number(style.opacity) === 0) {
+    selection.removeAllRanges();
+    return undefined;
+  }
   const range = selection.rangeCount === 1 ? selection.getRangeAt(0) : createOrderedRange(selection.anchorNode, selection.anchorOffset, selection.focusNode, selection.focusOffset);
   if (!range || range.collapsed) {
     log("$$$$$$$$$$$$$$$$$ CANNOT GET NON-COLLAPSED SELECTION RANGE?!");
@@ -2864,6 +2872,13 @@ function calculateHorizontalPageRanges() {
     let rect;
     let processText = false;
     if (element.nodeType === Node.TEXT_NODE) {
+      // let computedStyle = window.getComputedStyle(element);
+      // let opacity = computedStyle.opacity;
+
+      // if (Number(opacity) === 0) {
+      //   log(`Node with opacity 0: ${node.textContent}`);
+      // }
+
       if (/\S/.test(element.textContent)) {
         processText = true;
         let range = document.createRange();
@@ -3024,8 +3039,23 @@ function calculateHorizontalPageRanges() {
     log("to range index: " + range);
   }
   function processNode(node) {
-    // log("process node <" + node.textContent + ">");
     log("process node with name : ".concat(node.nodeName, " and type: ").concat(node.nodeType));
+
+    // Disabling this until we find a way to integrate this in the app;
+
+    // if (node.nodeType === Node.ELEMENT_NODE && node.textContent.length > 0) {
+    //   // Check the opacity of the element
+    //   let computedStyle = window.getComputedStyle(node);
+    //   let opacity = computedStyle.opacity;
+
+    //   if (opacity === "0") {
+    //     log(`Element has opacity 0, skipping processing: ${node.textContent}`);
+    //     return;
+    //   }
+    // }
+
+    // log("process node <" + node.textContent + ">");
+
     const keys = Object.keys(rangeData);
     if (node.nodeName === "p" && keys.length > 0) {
       const lastKey = keys[keys.length - 1];
