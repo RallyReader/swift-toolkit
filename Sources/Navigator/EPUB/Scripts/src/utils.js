@@ -493,7 +493,7 @@ export function calculateHorizontalPageRanges() {
       }
     }
 
-    if (node.childNodes.length > 1) {
+    if (node.childNodes.length > 0) {
       let child = node.firstChild;
       while (child) {
         // log("<         1         >");
