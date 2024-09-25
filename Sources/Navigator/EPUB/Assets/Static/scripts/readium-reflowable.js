@@ -2872,13 +2872,6 @@ function calculateHorizontalPageRanges() {
     let rect;
     let processText = false;
     if (element.nodeType === Node.TEXT_NODE) {
-      // let computedStyle = window.getComputedStyle(element);
-      // let opacity = computedStyle.opacity;
-
-      // if (Number(opacity) === 0) {
-      //   log(`Node with opacity 0: ${node.textContent}`);
-      // }
-
       if (/\S/.test(element.textContent)) {
         processText = true;
         let range = document.createRange();
@@ -3065,7 +3058,7 @@ function calculateHorizontalPageRanges() {
         addTextToRange("\n", rangeIndex);
       }
     }
-    if (node.childNodes.length > 1) {
+    if (node.childNodes.length > 0) {
       let child = node.firstChild;
       while (child) {
         // log("<         1         >");
