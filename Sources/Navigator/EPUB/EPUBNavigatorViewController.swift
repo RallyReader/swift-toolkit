@@ -913,7 +913,7 @@ open class EPUBNavigatorViewController: UIViewController,
 
         if decorations.isEmpty {
             for (_, pageView) in paginationView.loadedViews {
-                let script = enhanced ? "requestAnimationFrame(function () { readium.getDecorations('\(group)').clearEnhanced(); });" : "requestAnimationFrame(function () { readium.getDecorations('\(group)').clear(); });"
+                let script = enhanced ? "requestAnimationFrame(function () { readium.getDecorations('\(group)').clearAllEnhanced(); });" : "requestAnimationFrame(function () { readium.getDecorations('\(group)').clear(); });"
                 (pageView as? EPUBSpreadView)?.evaluateScript(
                     // The updates command are using `requestAnimationFrame()`, so we need it for
                     // `clear()` as well otherwise we might recreate a highlight after it has been

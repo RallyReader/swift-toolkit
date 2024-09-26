@@ -116,6 +116,7 @@ export function DecorationGroup(groupId, groupName) {
   var lastItemId = 0;
   var container = null;
   var activable = false;
+  var visibleContainers = [];
 
   function isActivable() {
     return activable;
@@ -190,20 +191,16 @@ export function DecorationGroup(groupId, groupName) {
     items.length = 0;
   }
 
-  // function clearEnhanced() {
-  //   items.forEach((item) => {
-  //     item.clickableElements = null;
-  //     if (item.container) {
-  //       while (item.container.firstChild) {
-  //         item.container.removeChild(item.container.firstChild);
-  //       }
-  //       // item.container.remove();
-  //       // item.container = null;
-  //     }
-  //   });
+  function clearAllEnhanced() {
+    log(`clearAllEnhanced`);
+    visibleContainers.forEach((container) => {
+      log(`clearing container: ${container.id}`);
+      container.remove();
+      container = null;
+    });
 
-  //   items.length = 0;
-  // }
+    visibleContainers.length = 0;
+  }
 
   function clearEnhanced(decorationId) {
     // Iterate over each item in the items array
@@ -226,6 +223,7 @@ export function DecorationGroup(groupId, groupName) {
    */
   function requestLayout() {
     clearContainer();
+    clearAllEnhanced();
     items.forEach((item) => layout(item));
   }
 
@@ -356,7 +354,14 @@ export function DecorationGroup(groupId, groupName) {
       (boundingRect.left + window.scrollX) / viewportWidth
     ); // Calculate the page index
 
-    let visibleArea = applyContainmentToArea(pageIndex); // Get or create the container for this page
+    let visibleAreaResponse = applyContainmentToArea(pageIndex); // Get or create the container for this page
+    let visibleArea = visibleAreaResponse.visibleArea;
+    let newArea = visibleAreaResponse.new;
+
+    if (newArea) {
+      log(`new area`);
+      visibleContainers.push(visibleArea);
+    }
 
     // Create the decoration element
     let itemContainer = document.createElement("div");
@@ -499,6 +504,8 @@ export function DecorationGroup(groupId, groupName) {
       yOffset = 0;
     }
 
+    let newArea = false;
+
     // Check if the visible area for this page already exists
     let visibleArea = document.querySelector(`#${visibleAreaId}`);
     if (!visibleArea) {
@@ -513,6 +520,8 @@ export function DecorationGroup(groupId, groupName) {
       visibleArea.style.height = `${window.innerHeight}px`;
       visibleArea.style.pointerEvents = "none"; // Allow interactions to pass through
       document.body.appendChild(visibleArea);
+
+      newArea = true;
     }
 
     if (
@@ -524,7 +533,7 @@ export function DecorationGroup(groupId, groupName) {
       visibleArea.style.top = `${yOffset}px`;
     }
 
-    return visibleArea;
+    return { visibleArea: visibleArea, new: newArea };
   }
 
   /**
@@ -544,6 +553,7 @@ export function DecorationGroup(groupId, groupName) {
     update,
     clear,
     clearEnhanced,
+    clearAllEnhanced,
     items,
     requestLayout,
     isActivable,
