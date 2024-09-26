@@ -70,13 +70,17 @@ class _HTMLResourceContentExtractor: _ResourceContentExtractor {
                         .replacingOccurrences(of: "<br />", with: "br2n")
                         .replacingOccurrences(of: "<br/>", with: "br2n")
                         .replacingOccurrences(of: "/p><p", with: "/p>\n<p")
+                        .replacingOccurrences(of: "&amp;", with: "ampToand")
                     )
                     
                     let text = parse(xml: unescapedContent)
                         ?? parse(html: unescapedContent)
                         ?? ""
                     
-                    return .success(text.replacingOccurrences(of: "br2n", with: "\n"))
+                    return .success(
+                        text.replacingOccurrences(of: "br2n", with: "\n")
+                            .replacingOccurrences(of: "ampToand", with: "&")
+                    )
                     
 //                    let text = parse(xml: content)
 //                        ?? parse(html: content)
