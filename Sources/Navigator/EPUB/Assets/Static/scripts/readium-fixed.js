@@ -1362,6 +1362,7 @@ function DecorationGroup(groupId, groupName) {
   var lastItemId = 0;
   var container = null;
   var activable = false;
+  var visibleContainers = [];
   function isActivable() {
     return activable;
   }
@@ -1435,22 +1436,15 @@ function DecorationGroup(groupId, groupName) {
     clearContainer();
     items.length = 0;
   }
-
-  // function clearEnhanced() {
-  //   items.forEach((item) => {
-  //     item.clickableElements = null;
-  //     if (item.container) {
-  //       while (item.container.firstChild) {
-  //         item.container.removeChild(item.container.firstChild);
-  //       }
-  //       // item.container.remove();
-  //       // item.container = null;
-  //     }
-  //   });
-
-  //   items.length = 0;
-  // }
-
+  function clearAllEnhanced() {
+    (0,_utils__WEBPACK_IMPORTED_MODULE_1__.log)("clearAllEnhanced");
+    visibleContainers.forEach(container => {
+      (0,_utils__WEBPACK_IMPORTED_MODULE_1__.log)("clearing container: ".concat(container.id));
+      container.remove();
+      container = null;
+    });
+    visibleContainers.length = 0;
+  }
   function clearEnhanced(decorationId) {
     // Iterate over each item in the items array
     (0,_utils__WEBPACK_IMPORTED_MODULE_1__.log)("trying to clear decorsation: ".concat(decorationId));
@@ -1472,6 +1466,7 @@ function DecorationGroup(groupId, groupName) {
    */
   function requestLayout() {
     clearContainer();
+    clearAllEnhanced();
     items.forEach(item => layout(item));
   }
 
@@ -1576,7 +1571,13 @@ function DecorationGroup(groupId, groupName) {
     let viewportWidth = window.innerWidth;
     let pageIndex = Math.floor((boundingRect.left + window.scrollX) / viewportWidth); // Calculate the page index
 
-    let visibleArea = applyContainmentToArea(pageIndex); // Get or create the container for this page
+    let visibleAreaResponse = applyContainmentToArea(pageIndex); // Get or create the container for this page
+    let visibleArea = visibleAreaResponse.visibleArea;
+    let newArea = visibleAreaResponse.new;
+    if (newArea) {
+      (0,_utils__WEBPACK_IMPORTED_MODULE_1__.log)("new area");
+      visibleContainers.push(visibleArea);
+    }
 
     // Create the decoration element
     let itemContainer = document.createElement("div");
@@ -1700,6 +1701,7 @@ function DecorationGroup(groupId, groupName) {
     if (yOffset < -100) {
       yOffset = 0;
     }
+    let newArea = false;
 
     // Check if the visible area for this page already exists
     let visibleArea = document.querySelector("#".concat(visibleAreaId));
@@ -1715,12 +1717,16 @@ function DecorationGroup(groupId, groupName) {
       visibleArea.style.height = "".concat(window.innerHeight, "px");
       visibleArea.style.pointerEvents = "none"; // Allow interactions to pass through
       document.body.appendChild(visibleArea);
+      newArea = true;
     }
     if (visibleArea.style.top != 0 && yOffset != 0 && visibleArea.style.top != yOffset) {
       (0,_utils__WEBPACK_IMPORTED_MODULE_1__.log)("window top offset: ".concat(yOffset));
       visibleArea.style.top = "".concat(yOffset, "px");
     }
-    return visibleArea;
+    return {
+      visibleArea: visibleArea,
+      new: newArea
+    };
   }
 
   /**
@@ -1739,6 +1745,7 @@ function DecorationGroup(groupId, groupName) {
     update,
     clear,
     clearEnhanced,
+    clearAllEnhanced,
     items,
     requestLayout,
     isActivable,
