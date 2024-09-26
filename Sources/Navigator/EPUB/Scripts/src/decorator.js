@@ -500,7 +500,7 @@ export function DecorationGroup(groupId, groupName) {
 
     log(`yoffset: ${yOffset}`);
 
-    if (yOffset < -100) {
+    if (yOffset < -300) {
       yOffset = 0;
     }
 

@@ -1698,7 +1698,7 @@ function DecorationGroup(groupId, groupName) {
     //const yOffset = 0; //window.innerHeight - document.documentElement.scrollHeight;
     let yOffset = window.innerHeight - document.documentElement.scrollHeight;
     (0,_utils__WEBPACK_IMPORTED_MODULE_1__.log)("yoffset: ".concat(yOffset));
-    if (yOffset < -100) {
+    if (yOffset < -300) {
       yOffset = 0;
     }
     let newArea = false;
