@@ -65,7 +65,7 @@ public struct OnDecorationActivatedEvent {
 /// Holds the metadata about a decoration activation interaction.
 public struct OnDecorationRectEvent {
     /// Activated decoration.
-    public let decoration: Decoration
+    public let decorationId: Decoration.Id
     /// Name of the group the decoration belongs to.
     public let group: String
     /// Frame of the bounding rect for the decoration, in the coordinate of the navigator view. This is only useful in
