@@ -1233,16 +1233,13 @@ extension EPUBNavigatorViewController: EPUBSpreadViewDelegate {
     
     func spreadView(_ spreadView: EPUBSpreadView, didCalculateDecorationRect id: Decoration.Id, inGroup group: String, frame: CGRect?) {
         guard
-            let callbacks = decorationRectsCallbacks[group].takeIf({ !$0.isEmpty }),
-            let decoration: Decoration = decorations[group]?
-            .first(where: { $0.decoration.id == id })
-            .map(\.decoration)
+            let callbacks = decorationRectsCallbacks[group].takeIf({ !$0.isEmpty })
         else {
             return
         }
 
         for callback in callbacks {
-            callback(OnDecorationRectEvent(decoration: decoration, group: group, rect: frame))
+            callback(OnDecorationRectEvent(decorationId: id, group: group, rect: frame))
         }
     }
 
