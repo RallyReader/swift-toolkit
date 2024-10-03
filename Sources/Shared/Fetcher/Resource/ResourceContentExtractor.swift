@@ -71,6 +71,7 @@ class _HTMLResourceContentExtractor: _ResourceContentExtractor {
                         .replacingOccurrences(of: "<br/>", with: "br2n")
                         .replacingOccurrences(of: "/p><p", with: "/p>\n<p")
                         .replacingOccurrences(of: "&amp;", with: "ampToand")
+                        .replacingOccurrences(of: "&#x0026;", with: "ampToand")
                     )
                     
                     let text = parse(xml: unescapedContent)
