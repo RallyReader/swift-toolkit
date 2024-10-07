@@ -274,6 +274,30 @@ class EPUBSpreadView: UIView, Loggable, PageView {
         frame.origin = convertPointToNavigatorSpace(frame.origin)
         delegate?.spreadView(self, selectionDidChange: text, frame: frame)
     }
+    
+    private func selectionRectDidChange(_ body: Any) {
+        if body is NSNull {
+            focusedResource = nil
+            delegate?.spreadView(self, selectionDidChange: nil, frame: .zero)
+            return
+        }
+
+        guard
+            let selection = body as? [String: Any],
+            let href = selection["href"] as? String,
+            let text = try? Locator.Text(json: selection["text"]),
+            var frame = CGRect(json: selection["rect"])
+        else {
+            focusedResource = nil
+            delegate?.spreadView(self, selectionDidChange: nil, frame: .zero)
+            log(.warning, "Invalid body for selectionDidChange: \(body)")
+            return
+        }
+
+        focusedResource = spread.links.first(withHREF: href)
+        frame.origin = convertPointToNavigatorSpace(frame.origin)
+        delegate?.spreadView(self, selectionDidChange: text, frame: frame)
+    }
 
     /// Update webview style to userSettings.
     /// To override in subclasses.
@@ -352,6 +376,7 @@ class EPUBSpreadView: UIView, Loggable, PageView {
         registerJSMessage(named: "spreadLoadStarted") { [weak self] in self?.spreadLoadDidStart($0) }
         registerJSMessage(named: "spreadLoaded") { [weak self] in self?.spreadDidLoad($0) }
         registerJSMessage(named: "selectionChanged") { [weak self] in self?.selectionDidChange($0) }
+        registerJSMessage(named: "selectionRectChanged") { [weak self] in self?.selectionRectDidChange($0) }
         registerJSMessage(named: "decorationActivated") { [weak self] in self?.decorationDidActivate($0) }
         registerJSMessage(named: "decorationRect") { [weak self] in self?.decorationRect($0) }
         registerJSMessage(named: "pressKey") { [weak self] in self?.didPressKey($0) }

@@ -1702,22 +1702,31 @@ function DecorationGroup(groupId, groupName) {
       yOffset = 0;
     }
     let newArea = false;
-
-    // Check if the visible area for this page already exists
-    let visibleArea = document.querySelector("#".concat(visibleAreaId));
+    let visibleArea = null;
+    for (const container of visibleContainers) {
+      if (container.id === visibleAreaId) {
+        visibleArea = container;
+        (0,_utils__WEBPACK_IMPORTED_MODULE_1__.log)("using container from array: ".concat(container.id));
+        break;
+      }
+    }
     if (!visibleArea) {
-      // Create a new container for the visible area (this page)
-      visibleArea = document.createElement("div");
-      visibleArea.classList.add("visible-area");
-      visibleArea.setAttribute("id", visibleAreaId);
-      visibleArea.style.position = "absolute";
-      visibleArea.style.left = "".concat(visibleAreaLeft, "px");
-      visibleArea.style.top = "".concat(yOffset, "px");
-      visibleArea.style.width = "".concat(viewportWidth, "px");
-      visibleArea.style.height = "".concat(window.innerHeight, "px");
-      visibleArea.style.pointerEvents = "none"; // Allow interactions to pass through
-      document.body.appendChild(visibleArea);
-      newArea = true;
+      // Check if the visible area for this page already exists
+      visibleArea = document.querySelector("#".concat(visibleAreaId));
+      if (!visibleArea) {
+        // Create a new container for the visible area (this page)
+        visibleArea = document.createElement("div");
+        visibleArea.classList.add("visible-area");
+        visibleArea.setAttribute("id", visibleAreaId);
+        visibleArea.style.position = "absolute";
+        visibleArea.style.left = "".concat(visibleAreaLeft, "px");
+        visibleArea.style.top = "".concat(yOffset, "px");
+        visibleArea.style.width = "".concat(viewportWidth, "px");
+        visibleArea.style.height = "".concat(window.innerHeight, "px");
+        visibleArea.style.pointerEvents = "none"; // Allow interactions to pass through
+        document.body.appendChild(visibleArea);
+        newArea = true;
+      }
     }
     if (visibleArea.style.top != 0 && yOffset != 0 && visibleArea.style.top != yOffset) {
       (0,_utils__WEBPACK_IMPORTED_MODULE_1__.log)("window top offset: ".concat(yOffset));
@@ -2367,6 +2376,7 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
 /* harmony export */   convertRangeInfo: () => (/* binding */ convertRangeInfo),
 /* harmony export */   getCurrentSelection: () => (/* binding */ getCurrentSelection),
+/* harmony export */   getCurrentSelectionLazy: () => (/* binding */ getCurrentSelectionLazy),
 /* harmony export */   getTextFrom: () => (/* binding */ getTextFrom),
 /* harmony export */   location2RangeInfo: () => (/* binding */ location2RangeInfo)
 /* harmony export */ });
@@ -2401,6 +2411,36 @@ function getCurrentSelection() {
   if (!text) {
     return null;
   }
+  const rect = getSelectionRect();
+  return {
+    href,
+    text,
+    rect
+  };
+}
+
+// We're only interested in the rect at this stage
+function getCurrentSelectionLazy() {
+  var _selection$toString;
+  if (!readium.link) {
+    return null;
+  }
+  const href = readium.link.href;
+  if (!href) {
+    return null;
+  }
+  const selection = window.getSelection();
+  if (!selection) {
+    return null;
+  }
+  const highlight = (_selection$toString = selection.toString()) !== null && _selection$toString !== void 0 ? _selection$toString : "";
+  const before = "";
+  const after = "";
+  const text = {
+    highlight,
+    before,
+    after
+  };
   const rect = getSelectionRect();
   return {
     href,
@@ -2778,7 +2818,18 @@ window.addEventListener("scroll", function () {
   ticking = true;
 });
 document.addEventListener("selectionchange", debounce(50, function () {
-  webkit.messageHandlers.selectionChanged.postMessage((0,_selection__WEBPACK_IMPORTED_MODULE_1__.getCurrentSelection)());
+  const currentSelection = (0,_selection__WEBPACK_IMPORTED_MODULE_1__.getCurrentSelectionLazy)();
+  log("did calculate current selection");
+  webkit.messageHandlers.selectionRectChanged.postMessage(currentSelection);
+}));
+
+// This is temporary fix; not ideal
+// First we read the rect so that the gesture does not timeout
+// Calculating the Text can take a long time in big chapters on slow devices
+document.addEventListener("selectionchange", debounce(100, function () {
+  const currentSelection = (0,_selection__WEBPACK_IMPORTED_MODULE_1__.getCurrentSelection)();
+  log("did calculate current selection");
+  webkit.messageHandlers.selectionChanged.postMessage(currentSelection);
 }));
 function orientationChanged() {
   maxScreenX = window.orientation === 0 || window.orientation == 180 ? screen.width : screen.height;
@@ -3222,6 +3273,15 @@ function rangeFromLocator(locator) {
 
       if (!root) {
         root = document.body;
+      }
+      if (locations) {
+        // If there is info about the start and end positions from the client, use that
+        const start = locations.start;
+        const end = locations.end;
+        if (start !== undefined && end !== undefined) {
+          const anchorSelector = new _vendor_hypothesis_anchoring_types__WEBPACK_IMPORTED_MODULE_0__.TextPositionAnchor(root, start, end);
+          return anchorSelector.toRange();
+        }
       }
       let anchor = new _vendor_hypothesis_anchoring_types__WEBPACK_IMPORTED_MODULE_0__.TextQuoteAnchor(root, text.highlight, {
         prefix: text.before,

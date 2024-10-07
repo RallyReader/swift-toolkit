@@ -6,8 +6,15 @@
 
 // Catch JS errors to log them in the app.
 
-import { TextQuoteAnchor } from "./vendor/hypothesis/anchoring/types";
-import { getCurrentSelection, getTextFrom } from "./selection";
+import {
+  TextQuoteAnchor,
+  TextPositionAnchor,
+} from "./vendor/hypothesis/anchoring/types";
+import {
+  getCurrentSelection,
+  getCurrentSelectionLazy,
+  getTextFrom,
+} from "./selection";
 import { getClientRectsNoOverlap, toNativeRect } from "./rect";
 
 /**
@@ -150,7 +157,21 @@ window.addEventListener("scroll", function () {
 document.addEventListener(
   "selectionchange",
   debounce(50, function () {
-    webkit.messageHandlers.selectionChanged.postMessage(getCurrentSelection());
+    const currentSelection = getCurrentSelectionLazy();
+    log(`did calculate current selection`);
+    webkit.messageHandlers.selectionRectChanged.postMessage(currentSelection);
+  })
+);
+
+// This is temporary fix; not ideal
+// First we read the rect so that the gesture does not timeout
+// Calculating the Text can take a long time in big chapters on slow devices
+document.addEventListener(
+  "selectionchange",
+  debounce(100, function () {
+    const currentSelection = getCurrentSelection();
+    log(`did calculate current selection`);
+    webkit.messageHandlers.selectionChanged.postMessage(currentSelection);
   })
 );
 
@@ -686,8 +707,20 @@ export function rangeFromLocator(locator) {
           // root = document.querySelector(locations.cssSelector);
         }
       }
+
       if (!root) {
         root = document.body;
+      }
+
+      if (locations) {
+        // If there is info about the start and end positions from the client, use that
+        const start = locations.start;
+        const end = locations.end;
+
+        if (start !== undefined && end !== undefined) {
+          const anchorSelector = new TextPositionAnchor(root, start, end);
+          return anchorSelector.toRange();
+        }
       }
 
       let anchor = new TextQuoteAnchor(root, text.highlight, {
