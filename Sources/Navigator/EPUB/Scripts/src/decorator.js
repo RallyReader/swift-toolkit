@@ -505,23 +505,35 @@ export function DecorationGroup(groupId, groupName) {
     }
 
     let newArea = false;
+    let visibleArea = null;
 
-    // Check if the visible area for this page already exists
-    let visibleArea = document.querySelector(`#${visibleAreaId}`);
+    for (const container of visibleContainers) {
+      if (container.id === visibleAreaId) {
+        visibleArea = container;
+        log(`using container from array: ${container.id}`);
+        break;
+      }
+    }
+
     if (!visibleArea) {
-      // Create a new container for the visible area (this page)
-      visibleArea = document.createElement("div");
-      visibleArea.classList.add("visible-area");
-      visibleArea.setAttribute("id", visibleAreaId);
-      visibleArea.style.position = "absolute";
-      visibleArea.style.left = `${visibleAreaLeft}px`;
-      visibleArea.style.top = `${yOffset}px`;
-      visibleArea.style.width = `${viewportWidth}px`;
-      visibleArea.style.height = `${window.innerHeight}px`;
-      visibleArea.style.pointerEvents = "none"; // Allow interactions to pass through
-      document.body.appendChild(visibleArea);
+      // Check if the visible area for this page already exists
+      visibleArea = document.querySelector(`#${visibleAreaId}`);
 
-      newArea = true;
+      if (!visibleArea) {
+        // Create a new container for the visible area (this page)
+        visibleArea = document.createElement("div");
+        visibleArea.classList.add("visible-area");
+        visibleArea.setAttribute("id", visibleAreaId);
+        visibleArea.style.position = "absolute";
+        visibleArea.style.left = `${visibleAreaLeft}px`;
+        visibleArea.style.top = `${yOffset}px`;
+        visibleArea.style.width = `${viewportWidth}px`;
+        visibleArea.style.height = `${window.innerHeight}px`;
+        visibleArea.style.pointerEvents = "none"; // Allow interactions to pass through
+        document.body.appendChild(visibleArea);
+
+        newArea = true;
+      }
     }
 
     if (

@@ -30,6 +30,28 @@ export function getCurrentSelection() {
   return { href, text, rect };
 }
 
+// We're only interested in the rect at this stage
+export function getCurrentSelectionLazy() {
+  if (!readium.link) {
+    return null;
+  }
+  const href = readium.link.href;
+  if (!href) {
+    return null;
+  }
+  const selection = window.getSelection();
+
+  if (!selection) {
+    return null;
+  }
+  const highlight = selection.toString() ?? "";
+  const before = "";
+  const after = "";
+  const text = { highlight, before, after };
+  const rect = getSelectionRect();
+  return { href, text, rect };
+}
+
 function getSelectionRect() {
   try {
     let sel = window.getSelection();
