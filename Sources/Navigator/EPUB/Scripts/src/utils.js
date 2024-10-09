@@ -6,10 +6,7 @@
 
 // Catch JS errors to log them in the app.
 
-import {
-  TextQuoteAnchor,
-  TextPositionAnchor,
-} from "./vendor/hypothesis/anchoring/types";
+import { TextQuoteAnchor } from "./vendor/hypothesis/anchoring/types";
 import {
   getCurrentSelection,
   getCurrentSelectionLazy,
@@ -712,14 +709,16 @@ export function rangeFromLocator(locator) {
         root = document.body;
       }
 
+      let start = null;
+      let end = null;
+
       if (locations) {
         // If there is info about the start and end positions from the client, use that
-        const start = locations.start;
-        const end = locations.end;
 
-        if (start !== undefined && end !== undefined) {
-          const anchorSelector = new TextPositionAnchor(root, start, end);
-          return anchorSelector.toRange();
+        if (locations.start !== undefined && locations.end !== undefined) {
+          log(`actual start and end: [${locations.start}, ${locations.end}]`);
+          start = Math.max(locations.start - 5, 0);
+          end = Math.min(locations.end + 5, root.textContent.length);
         }
       }
 
@@ -728,7 +727,8 @@ export function rangeFromLocator(locator) {
         suffix: text.after,
       });
 
-      return anchor.toRange();
+      log(`approximate start and end: [${start}, ${end}]`);
+      return anchor.toRange({}, start, end);
     }
 
     if (locations) {

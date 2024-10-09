@@ -3274,20 +3274,23 @@ function rangeFromLocator(locator) {
       if (!root) {
         root = document.body;
       }
+      let start = null;
+      let end = null;
       if (locations) {
         // If there is info about the start and end positions from the client, use that
-        const start = locations.start;
-        const end = locations.end;
-        if (start !== undefined && end !== undefined) {
-          const anchorSelector = new _vendor_hypothesis_anchoring_types__WEBPACK_IMPORTED_MODULE_0__.TextPositionAnchor(root, start, end);
-          return anchorSelector.toRange();
+
+        if (locations.start !== undefined && locations.end !== undefined) {
+          log("actual start and end: [".concat(locations.start, ", ").concat(locations.end, "]"));
+          start = Math.max(locations.start - 5, 0);
+          end = Math.min(locations.end + 5, root.textContent.length);
         }
       }
       let anchor = new _vendor_hypothesis_anchoring_types__WEBPACK_IMPORTED_MODULE_0__.TextQuoteAnchor(root, text.highlight, {
         prefix: text.before,
         suffix: text.after
       });
-      return anchor.toRange();
+      log("approximate start and end: [".concat(start, ", ").concat(end, "]"));
+      return anchor.toRange({}, start, end);
     }
     if (locations) {
       var element = null;
@@ -3450,16 +3453,23 @@ __webpack_require__.r(__webpack_exports__);
  * @return {StringMatch[]}
  */
 function search(text, str, maxErrors) {
-  // Do a fast search for exact matches. The `approx-string-match` library
-  // doesn't currently incorporate this optimization itself.
+  let approximateStart = arguments.length > 3 && arguments[3] !== undefined ? arguments[3] : null;
+  let approximateEnd = arguments.length > 4 && arguments[4] !== undefined ? arguments[4] : null;
+  // If approximate positions are provided, limit the search area
+  let searchText = text;
+  if (approximateStart !== null && approximateEnd !== null) {
+    searchText = text.slice(approximateStart, approximateEnd);
+  }
+
+  // Perform fast search for exact matches in the search area
   let matchPos = 0;
   let exactMatches = [];
   while (matchPos !== -1) {
-    matchPos = text.indexOf(str, matchPos);
+    matchPos = searchText.indexOf(str, matchPos);
     if (matchPos !== -1) {
       exactMatches.push({
-        start: matchPos,
-        end: matchPos + str.length,
+        start: approximateStart !== null ? matchPos + approximateStart : matchPos,
+        end: approximateStart !== null ? matchPos + str.length + approximateStart : matchPos + str.length,
         errors: 0
       });
       matchPos += 1;
@@ -3468,9 +3478,15 @@ function search(text, str, maxErrors) {
   if (exactMatches.length > 0) {
     return exactMatches;
   }
+  //  else {
+  //   if (approximateStart != null && approximateEnd != null && (approximateStart > 0 || approximateEnd < text.length)) {
+  //     const newApproxStart = Math.max(0, approximateStart-100);
+  //     const newApproxEnd = Math.min(approximateEnd+100, text.length);
+  //     return search(text, str, maxErrors, newApproxStart, newApproxEnd)
+  //   }
+  // }
 
-  // If there are no exact matches, do a more expensive search for matches
-  // with errors.
+  // If no exact matches, fallback to approximate search
   return (0,approx_string_match__WEBPACK_IMPORTED_MODULE_0__["default"])(text, str, maxErrors);
 }
 
@@ -3508,6 +3524,8 @@ function textMatchScore(text, str) {
  */
 function matchQuote(text, quote) {
   let context = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : {};
+  let approximateStart = arguments.length > 3 && arguments[3] !== undefined ? arguments[3] : null;
+  let approximateEnd = arguments.length > 4 && arguments[4] !== undefined ? arguments[4] : null;
   if (quote.length === 0) {
     return null;
   }
@@ -3524,7 +3542,7 @@ function matchQuote(text, quote) {
   const maxErrors = Math.min(256, quote.length / 2);
 
   // Find closest matches for `quote` in `text` based on edit distance.
-  const matches = search(text, quote, maxErrors);
+  const matches = search(text, quote, maxErrors, approximateStart, approximateEnd);
   if (matches.length === 0) {
     return null;
   }
@@ -4139,7 +4157,9 @@ class TextQuoteAnchor {
    */
   toRange() {
     let options = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : {};
-    return this.toPositionAnchor(options).toRange();
+    let approximateStart = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : null;
+    let approximateEnd = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : null;
+    return this.toPositionAnchor(options, approximateStart, approximateEnd).toRange();
   }
 
   /**
@@ -4147,15 +4167,22 @@ class TextQuoteAnchor {
    */
   toPositionAnchor() {
     let options = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : {};
+    let approximateStart = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : null;
+    let approximateEnd = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : null;
     const text = /** @type {string} */this.root.textContent;
+    log("passing hint: ".concat(options.hint));
     const match = (0,_match_quote__WEBPACK_IMPORTED_MODULE_0__.matchQuote)(text, this.exact, _objectSpread(_objectSpread({}, this.context), {}, {
       hint: options.hint
-    }));
+    }), approximateStart, approximateEnd);
     if (!match) {
       throw new Error('Quote not found');
     }
     return new TextPositionAnchor(this.root, match.start, match.end);
   }
+}
+function log() {
+  var message = Array.prototype.slice.call(arguments).join(" ");
+  webkit.messageHandlers.log.postMessage(message);
 }
 
 /***/ }),
