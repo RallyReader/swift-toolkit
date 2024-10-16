@@ -1,5 +1,5 @@
 //
-//  Copyright 2021 Readium Foundation. All rights reserved.
+//  Copyright 2024 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
@@ -7,12 +7,10 @@
 import Foundation
 
 public typealias HTTPResult<Success> = Result<Success, HTTPError>
-public typealias HTTPDeferred<Success> = Deferred<Success, HTTPError>
 
 /// Represents an error occurring during an `HTTPClient` activity.
-public struct HTTPError: LocalizedError, Equatable, Loggable {
-
-    public enum Kind: Equatable {
+public struct HTTPError: Error, Loggable {
+    public enum Kind: Sendable {
         /// The provided request was not valid.
         case malformedRequest(url: String?)
         /// The received response couldn't be decoded.
@@ -32,10 +30,12 @@ public struct HTTPError: LocalizedError, Equatable, Loggable {
         case clientError
         /// (5xx) Server errors
         case serverError
+        /// Cannot connect to the server, or the host cannot be resolved.
+        case serverUnreachable
         /// The device is offline.
         case offline
         /// IO error while accessing the disk.
-        case ioError
+        case fileSystem(FileSystemError)
         /// The request was cancelled.
         case cancelled
         /// An error whose kind is not recognized.
@@ -43,7 +43,7 @@ public struct HTTPError: LocalizedError, Equatable, Loggable {
 
         public init?(statusCode: Int) {
             switch statusCode {
-            case 200..<400:
+            case 200 ..< 400:
                 return nil
             case 400:
                 self = .badRequest
@@ -53,11 +53,11 @@ public struct HTTPError: LocalizedError, Equatable, Loggable {
                 self = .forbidden
             case 404:
                 self = .notFound
-            case 405...498:
+            case 405 ... 498:
                 self = .clientError
             case 499:
                 self = .cancelled
-            case 500...599:
+            case 500 ... 599:
                 self = .serverError
             default:
                 self = .malformedResponse
@@ -79,6 +79,8 @@ public struct HTTPError: LocalizedError, Equatable, Loggable {
                     self = .malformedResponse
                 case .notConnectedToInternet, .networkConnectionLost:
                     self = .offline
+                case .cannotConnectToHost, .cannotFindHost:
+                    self = .serverUnreachable
                 case .timedOut:
                     self = .timeout
                 case .userAuthenticationRequired, .appTransportSecurityRequiresSecureConnection, .noPermissionsToReadFile:
@@ -113,8 +115,8 @@ public struct HTTPError: LocalizedError, Equatable, Loggable {
         self.cause = cause
         self.response = response
 
-        self.problemDetails = {
-            if let body = response?.body, response?.mediaType.matches(.problemDetails) == true {
+        problemDetails = {
+            if let body = response?.body, response?.mediaType?.matches(.problemDetails) == true {
                 do {
                     return try HTTPProblemDetails(data: body)
                 } catch {
@@ -141,49 +143,4 @@ public struct HTTPError: LocalizedError, Equatable, Loggable {
 
         self.init(kind: Kind(error: error), cause: error)
     }
-
-    public var errorDescription: String? {
-        if var message = problemDetails?.title {
-            if let detail = problemDetails?.detail {
-                message += "\n" + detail
-            }
-            return message
-        }
-
-        switch kind {
-        case .malformedRequest:
-            return R2SharedLocalizedString("HTTPError.malformedRequest")
-        case .malformedResponse:
-            return R2SharedLocalizedString("HTTPError.malformedResponse")
-        case .timeout:
-            return R2SharedLocalizedString("HTTPError.timeout")
-        case .badRequest:
-            return R2SharedLocalizedString("HTTPError.badRequest")
-        case .unauthorized:
-            return R2SharedLocalizedString("HTTPError.unauthorized")
-        case .forbidden:
-            return R2SharedLocalizedString("HTTPError.forbidden")
-        case .notFound:
-            return R2SharedLocalizedString("HTTPError.notFound")
-        case .clientError:
-            return R2SharedLocalizedString("HTTPError.clientError")
-        case .serverError:
-            return R2SharedLocalizedString("HTTPError.serverError")
-        case .cancelled:
-            return R2SharedLocalizedString("HTTPError.cancelled")
-        case .offline:
-            return R2SharedLocalizedString("HTTPError.offline")
-        case .ioError:
-            return R2SharedLocalizedString("HTTPError.ioError")
-        case .other:
-            return (cause as? LocalizedError)?.errorDescription
-        }
-    }
-
-    public static func ==(lhs: HTTPError, rhs: HTTPError) -> Bool {
-        return lhs.kind == rhs.kind
-            && lhs.response == rhs.response
-            && lhs.problemDetails == rhs.problemDetails
-    }
-
 }

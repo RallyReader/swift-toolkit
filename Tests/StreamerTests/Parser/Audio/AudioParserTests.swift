@@ -1,85 +1,90 @@
 //
-//  AudioParserTests.swift
-//  r2-streamer-swift
-//
-//  Created by Mickaël Menu on 15/07/2020.
-//
-//  Copyright 2020 Readium Foundation. All rights reserved.
-//  Use of this source code is governed by a BSD-style license which is detailed
-//  in the LICENSE file present in the project repository where this source code is maintained.
+//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Use of this source code is governed by the BSD-style license
+//  available in the top-level LICENSE file of the project.
 //
 
+import ReadiumShared
+@testable import ReadiumStreamer
 import XCTest
-import R2Shared
-@testable import R2Streamer
 
 class AudioParserTests: XCTestCase {
-
     let fixtures = Fixtures()
+
     var parser: AudioParser!
-    
-    var zabAsset: FileAsset!
-    var zabFetcher: Fetcher!
-    
-    var mp3Asset: FileAsset!
-    var mp3Fetcher: Fetcher!
-    
-    override func setUpWithError() throws {
-        parser = AudioParser()
-        
-        zabAsset = FileAsset(url: fixtures.url(for: "audiotest.zab"))
-        zabFetcher = try ArchiveFetcher(url: zabAsset.url)
-        
-        mp3Asset = FileAsset(url: fixtures.url(for: "audiotest/Test Audiobook/Latin.mp3"))
-        mp3Fetcher = FileFetcher(href: "/Latin.mp3", path: mp3Asset.url)
+
+    var zabAsset: Asset!
+    var mp3Asset: Asset!
+
+    override func setUp() async throws {
+        parser = AudioParser(assetRetriever: AssetRetriever(httpClient: DefaultHTTPClient()))
+
+        zabAsset = try await .container(ZIPArchiveOpener().open(
+            resource: FileResource(file: fixtures.url(for: "audiotest.zab")),
+            format: Format(specifications: .zip, .informalAudiobook, mediaType: .zab, fileExtension: "zab")
+        ).get())
+
+        mp3Asset = .resource(ResourceAsset(
+            resource: FileResource(file: fixtures.url(for: "audiotest/Test Audiobook/Latin.mp3")),
+            format: Format(specifications: .mp3, mediaType: .mp3, fileExtension: "mp3")
+        ))
     }
-    
-    func testRefusesNonAudioBased() throws {
-        let asset = FileAsset(url: fixtures.url(for: "futuristic_tales.cbz"))
-        let fetcher = try ArchiveFetcher(url: asset.url)
-        XCTAssertNil(try parser.parse(asset: asset, fetcher: fetcher, warnings: nil))
+
+    func testRefusesNonAudioBased() async throws {
+        let asset: Asset = try await .container(ZIPArchiveOpener().open(
+            resource: FileResource(file: fixtures.url(for: "futuristic_tales.cbz")),
+            format: Format(specifications: .zip, .informalComic, mediaType: .cbz, fileExtension: "cbz")
+        ).get())
+
+        do {
+            _ = try await parser.parse(asset: asset, warnings: nil).get()
+        } catch PublicationParseError.formatNotSupported {
+            return
+        } catch {}
+
+        XCTFail("Expected an error")
     }
-    
-    func testAcceptsZAB() {
-        XCTAssertNotNil(try parser.parse(asset: zabAsset, fetcher: zabFetcher, warnings: nil))
+
+    func testAcceptsZAB() async throws {
+        let result = try await parser.parse(asset: zabAsset, warnings: nil).get()
+        XCTAssertNotNil(result)
     }
-    
-    func testAcceptsMP3() {
-        XCTAssertNotNil(try parser.parse(asset: mp3Asset, fetcher: mp3Fetcher, warnings: nil))
+
+    func testAcceptsMP3() async throws {
+        let result = try await parser.parse(asset: mp3Asset, warnings: nil).get()
+        XCTAssertNotNil(result)
     }
-    
-    func testConformsToAudiobook() throws {
-        let publication = try XCTUnwrap(parser.parse(asset: zabAsset, fetcher: zabFetcher, warnings: nil)?.build())
-        
+
+    func testConformsToAudiobook() async throws {
+        let publication = try await parser.parse(asset: zabAsset, warnings: nil).get().build()
         XCTAssertEqual(publication.metadata.conformsTo, [.audiobook])
     }
-    
+
     /// The reading order is sorted alphabetically, ignores Thumbs.db, hidden files and non-audio
     /// files.
-    func testReadingOrderIsSortedAlphabetically() throws {
-        let publication = try XCTUnwrap(parser.parse(asset: zabAsset, fetcher: zabFetcher, warnings: nil)?.build())
-        
-        XCTAssertEqual(publication.readingOrder.map { $0.href }, [
-            "/Test Audiobook/gtr-jazz.mp3",
-            "/Test Audiobook/Latin.mp3",
-            "/Test Audiobook/vln-lin-cs.mp3"
+    func testReadingOrderIsSortedAlphabetically() async throws {
+        let publication = try await parser.parse(asset: zabAsset, warnings: nil).get().build()
+
+        XCTAssertEqual(publication.readingOrder.map(\.href), [
+            "Test%20Audiobook/gtr-jazz.mp3",
+            "Test%20Audiobook/Latin.mp3",
+            "Test%20Audiobook/vln-lin-cs.mp3",
         ])
     }
-    
-    func testHasNoCover() throws {
-        let publication = try XCTUnwrap(parser.parse(asset: zabAsset, fetcher: zabFetcher, warnings: nil)?.build())
-        XCTAssertNil(publication.link(withRel: .cover))
-    }
-    
-    func testComputeTitleFromArchiveRootDirectory() throws {
-        let publication = try XCTUnwrap(parser.parse(asset: zabAsset, fetcher: zabFetcher, warnings: nil)?.build())
-        XCTAssertEqual(publication.metadata.title, "Test Audiobook")
-    }
-    
-    func testHasNoPositions() throws {
-        let publication = try XCTUnwrap(parser.parse(asset: zabAsset, fetcher: zabFetcher, warnings: nil)?.build())
-        
-        XCTAssertEqual(publication.positions.count, 0)
+
+    func testHasNoCover() async throws {
+        let publication = try await parser.parse(asset: zabAsset, warnings: nil).get().build()
+        XCTAssertNil(publication.linkWithRel(.cover))
     }
 
+    func testComputeTitleFromArchiveRootDirectory() async throws {
+        let publication = try await parser.parse(asset: zabAsset, warnings: nil).get().build()
+        XCTAssertEqual(publication.metadata.title, "Test Audiobook")
+    }
+
+    func testHasNoPositions() async throws {
+        let publication = try await parser.parse(asset: zabAsset, warnings: nil).get().build()
+        let result = try await publication.positions().get()
+        XCTAssertEqual(result.count, 0)
+    }
 }

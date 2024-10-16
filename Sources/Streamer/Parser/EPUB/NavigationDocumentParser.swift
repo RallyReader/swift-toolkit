@@ -1,40 +1,34 @@
 //
-//  NavigationDocumentParser.swift
-//  r2-streamer-swift
-//
-//  Created by Mickaël Menu on 16.05.19.
-//
-//  Copyright 2019 Readium Foundation. All rights reserved.
-//  Use of this source code is governed by a BSD-style license which is detailed
-//  in the LICENSE file present in the project repository where this source code is maintained.
+//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Use of this source code is governed by the BSD-style license
+//  available in the top-level LICENSE file of the project.
 //
 
-import R2Shared
-import Fuzi
 import Foundation
+import Fuzi
+import ReadiumShared
 
 /// The navigation document if documented here at Navigation
 /// https://idpf.github.io/a11y-guidelines/
 /// http://www.idpf.org/epub/301/spec/epub-contentdocs.html#sec-xhtml-nav-def
 final class NavigationDocumentParser {
-    
     enum NavType: String {
         case tableOfContents = "toc"
         case pageList = "page-list"
-        case landmarks = "landmarks"
+        case landmarks
         case listOfIllustrations = "loi"
         case listOfTables = "lot"
         case listOfAudiofiles = "loa"
         case listOfVideos = "lov"
     }
-    
+
     private let data: Data
-    private let path: String
-    
+    private let url: RelativeURL
+
     /// Builds the navigation document parser from Navigation Document data and its path. The path is used to normalize the links' hrefs.
-    init(data: Data, at path: String) {
+    init(data: Data, at url: RelativeURL) {
         self.data = data
-        self.path = path
+        self.url = url
     }
 
     private lazy var document: Fuzi.XMLDocument? = {
@@ -49,17 +43,17 @@ final class NavigationDocumentParser {
     /// - Parameter type: epub:type of the <nav> element to parse.
     func links(for type: NavType) -> [Link] {
         guard let document = document,
-            let nav = document.firstChild(xpath: "//html:nav[@epub:type='\(type.rawValue)']") else
-        {
+              let nav = document.firstChild(xpath: "//html:nav[@epub:type='\(type.rawValue)']")
+        else {
             return []
         }
 
         return links(in: nav)
     }
-    
+
     /// Parses recursively an <ol> as a list of `Link`.
     private func links(in element: Fuzi.XMLElement) -> [Link] {
-        return element.xpath("html:ol[1]/html:li")
+        element.xpath("html:ol[1]/html:li")
             .compactMap { self.link(for: $0) }
     }
 
@@ -68,24 +62,24 @@ final class NavigationDocumentParser {
         guard let label = li.firstChild(xpath: "html:a|html:span") else {
             return nil
         }
-        
+
         return NavigationDocumentParser.makeLink(
             title: label.stringValue,
-            href: label.attr("href"),
+            href: label.attr("href").flatMap(RelativeURL.init(epubHREF:)),
             children: links(in: li),
-            basePath: path
+            baseURL: url
         )
     }
-    
+
     /// Creates a new navigation `Link` object from a label, href and children, after validating the data.
-    static func makeLink(title: String?, href: String?, children: [Link], basePath: String) -> Link? {
+    static func makeLink(title: String?, href: RelativeURL?, children: [Link], baseURL: RelativeURL) -> Link? {
         // Cleans up title label.
         // http://www.idpf.org/epub/301/spec/epub-contentdocs.html#confreq-nav-a-cnt
         let title = (title ?? "")
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        let href = href.map { HREF($0, relativeTo: basePath).string }
+
+        let href = href.flatMap { baseURL.resolve($0) }
 
         guard
             // A zero-length text label must be ignored
@@ -93,12 +87,11 @@ final class NavigationDocumentParser {
             !title.isEmpty,
             // An unlinked item (`span`) without children must be ignored
             // http://www.idpf.org/epub/301/spec/epub-contentdocs.html#confreq-nav-a-nest
-            href != nil || !children.isEmpty else
-        {
+            href != nil || !children.isEmpty
+        else {
             return nil
         }
-        
-        return Link(href: href ?? "#", title: title, children: children)
-    }
 
+        return Link(href: href?.string ?? "#", title: title, children: children)
+    }
 }

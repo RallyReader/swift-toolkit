@@ -10,6 +10,13 @@ import "./index";
 
 window.readium.isReflowable = true;
 
+// Once `index-reflowable.js` is being executed, this means that the spread is
+// starting to load, so it's the right time to send out the `spreadLoadStarted`
+// event. If instead we were to send it after the window's "load" event below is
+// received, we'd be sending the `spreadLoadStarted` event after all the
+// HTML and external resources (stylesheets, images, etc) have been loaded.
+webkit.messageHandlers.spreadLoadStarted.postMessage({});
+
 window.addEventListener("load", function () {
   // Notifies native code that the page is loaded after it is rendered.
   // Waiting for the next animation frame seems to do the trick to make sure the page is fully rendered.
@@ -25,19 +32,4 @@ window.addEventListener("load", function () {
     "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, shrink-to-fit=no"
   );
   document.head.appendChild(meta);
-});
-
-// Injects Readium CSS stylesheets.
-document.addEventListener("DOMContentLoaded", function () {
-  function createLink(name) {
-    var link = document.createElement("link");
-    link.setAttribute("rel", "stylesheet");
-    link.setAttribute("type", "text/css");
-    link.setAttribute("href", window.readiumCSSBaseURL + name + ".css");
-    return link;
-  }
-
-  var head = document.getElementsByTagName("head")[0];
-  head.appendChild(createLink("ReadiumCSS-after"));
-  head.insertBefore(createLink("ReadiumCSS-before"), head.children[0]);
 });

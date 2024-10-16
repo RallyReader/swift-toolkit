@@ -8,7 +8,7 @@ packages:
     path: R2LCPClient
   GRDB:
     url: https://github.com/groue/GRDB.swift.git
-    from: 5.8.0
+    from: 6.9.23
   Kingfisher:
     url: https://github.com/onevcat/Kingfisher.git
     from: 5.15.8
@@ -18,6 +18,15 @@ packages:
   SwiftSoup:
     url: https://github.com/scinfu/SwiftSoup.git
     from: 2.3.2
+schemes:
+  TestApp:
+    build:
+      targets:
+        TestApp: none
+    test:
+      testPlans:
+        - path: TestApp.xctestplan
+          defaultPlan: true
 targets:
   TestApp:
     type: application
@@ -25,15 +34,23 @@ targets:
     deploymentTarget: "14.0"
     sources: 
       - path: Sources
+        excludes:
+          - Resources/Fonts
+      - path: Sources/Resources/Fonts
+        type: folder
     dependencies:
       - package: R2LCPClient
         product: R2LCPClient
       - package: Readium
-        product: R2Shared
+        product: ReadiumShared
       - package: Readium
-        product: R2Streamer
+        product: ReadiumStreamer
       - package: Readium
-        product: R2Navigator
+        product: ReadiumNavigator
+      - package: Readium
+        product: ReadiumAdapterGCDWebServer
+      - package: Readium
+        product: ReadiumAdapterLCPSQLite
       - package: Readium
         product: ReadiumOPDS
       - package: Readium
@@ -44,4 +61,5 @@ targets:
       - package: SwiftSoup
     settings:
       OTHER_SWIFT_FLAGS: -DLCP
+      DEVELOPMENT_TEAM: ${RD_DEVELOPMENT_TEAM}
 

@@ -1,12 +1,7 @@
 //
-//  CoverService.swift
-//  r2-shared-swift
-//
-//  Created by Mickaël Menu on 31/05/2020.
-//
-//  Copyright 2020 Readium Foundation. All rights reserved.
-//  Use of this source code is governed by a BSD-style license which is detailed
-//  in the LICENSE file present in the project repository where this source code is maintained.
+//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Use of this source code is governed by the BSD-style license
+//  available in the top-level LICENSE file of the project.
 //
 
 import Foundation
@@ -30,65 +25,65 @@ public typealias CoverServiceFactory = (PublicationServiceContext) -> CoverServi
 /// - generating a bitmap from scratch using the publication's title
 /// - using a cover selected by the user
 public protocol CoverService: PublicationService {
-    
     /// Returns the publication cover as a bitmap at its maximum size.
     ///
     /// If the cover is not a bitmap format (e.g. SVG), it will be scaled down to fit the screen
     /// using `UIScreen.main.bounds.size`.
-    var cover: UIImage? { get }
+    func cover() async -> ReadResult<UIImage?>
 
     /// Returns the publication cover as a bitmap, scaled down to fit the given `maxSize`.
     ///
     /// If the cover is not in a bitmap format (e.g. SVG), it is exported as a bitmap filling
     /// `maxSize`. The cover might be cached in memory for next calls.
-    func coverFitting(maxSize: CGSize) -> UIImage?
-    
+    func coverFitting(maxSize: CGSize) async -> ReadResult<UIImage?>
 }
 
 public extension CoverService {
-    
-    func coverFitting(maxSize: CGSize) -> UIImage? {
-        return cover?.scaleToFit(maxSize: maxSize)
+    @available(*, unavailable, message: "Use the async variant")
+    var cover: UIImage? { fatalError() }
+
+    func coverFitting(maxSize: CGSize) async -> ReadResult<UIImage?> {
+        await cover().map { $0?.scaleToFit(maxSize: maxSize) }
     }
-
 }
-
 
 // MARK: Publication Helpers
 
 public extension Publication {
-
     /// Returns the publication cover as a bitmap at its maximum size.
-    var cover: UIImage? {
-        warnIfMainThread()
-        return findService(CoverService.self)?.cover
-            ?? coverFromManifest()
+    func cover() async -> ReadResult<UIImage?> {
+        if let service = findService(CoverService.self) {
+            return await service.cover()
+        } else {
+            return await coverFromManifest()
+        }
     }
-    
+
     /// Returns the publication cover as a bitmap, scaled down to fit the given `maxSize`.
-    func coverFitting(maxSize: CGSize) -> UIImage? {
-        warnIfMainThread()
-        return findService(CoverService.self)?.coverFitting(maxSize: maxSize)
-            ?? coverFromManifest()?.scaleToFit(maxSize: maxSize)
+    func coverFitting(maxSize: CGSize) async -> ReadResult<UIImage?> {
+        if let service = findService(CoverService.self) {
+            return await service.coverFitting(maxSize: maxSize)
+        } else {
+            return await coverFromManifest()
+                .map { $0?.scaleToFit(maxSize: maxSize) }
+        }
     }
-    
+
     /// Extracts the first valid cover from the manifest links with `cover` relation.
-    private func coverFromManifest() -> UIImage? {
-        for link in links(withRel: .cover) {
-            if let cover = try? get(link).read().map(UIImage.init).get() {
-                return cover
+    private func coverFromManifest() async -> ReadResult<UIImage?> {
+        for link in linksWithRel(.cover) {
+            if let resource = get(link) {
+                return await resource.read()
+                    .map { UIImage(data: $0) }
             }
         }
-        return nil
+        return .success(nil)
     }
-    
 }
-
 
 // MARK: PublicationServicesBuilder Helpers
 
 public extension PublicationServicesBuilder {
-    
     mutating func setCoverServiceFactory(_ factory: CoverServiceFactory?) {
         if let factory = factory {
             set(CoverService.self, factory)
@@ -96,5 +91,4 @@ public extension PublicationServicesBuilder {
             remove(CoverService.self)
         }
     }
-    
 }

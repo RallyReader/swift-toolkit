@@ -7,6 +7,7 @@
 // Base script used by both reflowable and fixed layout resources.
 
 import "./gestures";
+import "./keyboard";
 import { findFirstVisibleLocator } from "./dom";
 import {
   removeProperty,
@@ -14,8 +15,9 @@ import {
   scrollRight,
   scrollToId,
   scrollToPosition,
-  scrollToText,
+  scrollToLocator,
   setProperty,
+  setCSSProperties,
 } from "./utils";
 import { getDecorations, registerTemplates } from "./decorator";
 
@@ -24,9 +26,10 @@ global.readium = {
   // utils
   scrollToId: scrollToId,
   scrollToPosition: scrollToPosition,
-  scrollToText: scrollToText,
+  scrollToLocator: scrollToLocator,
   scrollLeft: scrollLeft,
   scrollRight: scrollRight,
+  setCSSProperties: setCSSProperties,
   setProperty: setProperty,
   removeProperty: removeProperty,
 

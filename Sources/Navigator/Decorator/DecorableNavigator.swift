@@ -1,16 +1,15 @@
 //
-//  Copyright 2021 Readium Foundation. All rights reserved.
+//  Copyright 2024 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
 
 import Foundation
+import ReadiumShared
 import UIKit
-import R2Shared
 
 /// A navigator able to render arbitrary decorations over a publication.
 public protocol DecorableNavigator {
-
     /// Declares the current state of the decorations in the given decoration `group`.
     ///
     /// The Navigator will decide when to actually render each decoration efficiently. Your only responsibility is to
@@ -29,7 +28,7 @@ public protocol DecorableNavigator {
     /// Registers new callbacks for decoration interactions in the given `group`.
     ///
     /// - Parameter onActivated: Called when the user activates the decoration, e.g. with a click or tap.
-    func observeDecorationInteractions(inGroup group: String, onActivated: OnActivatedCallback?)
+    func observeDecorationInteractions(inGroup group: String, onActivated: @escaping OnActivatedCallback)
 
     /// Called when the user activates a decoration, e.g. with a click or tap.
     typealias OnActivatedCallback = (_ event: OnDecorationActivatedEvent) -> Void
@@ -49,18 +48,11 @@ public struct OnDecorationActivatedEvent {
     public let point: CGPoint?
 }
 
-public extension DecorableNavigator {
-    func observeDecorationInteractions(inGroup group: String, onActivated: OnActivatedCallback? = nil) {
-        observeDecorationInteractions(inGroup: group, onActivated: onActivated)
-    }
-}
-
 /// A decoration is a user interface element drawn on top of a publication. It associates a `style` to be rendered with
 /// a discrete `locator` in the publication.
 ///
 /// For example, decorations can be used to draw highlights, images or buttons.
 public struct Decoration: Hashable {
-
     /// An identifier for this decoration. It must be unique in the group the decoration is applied to.
     public var id: Id
 
@@ -88,7 +80,6 @@ public struct Decoration: Hashable {
     /// It is media type agnostic, meaning that each Navigator will translate the style into a set of rendering
     /// instructions which makes sense for the resource type.
     public struct Style: Hashable {
-
         /// Unique ID for a style.
         public struct Id: RawRepresentable, ExpressibleByStringLiteral, Hashable {
             public let rawValue: String
