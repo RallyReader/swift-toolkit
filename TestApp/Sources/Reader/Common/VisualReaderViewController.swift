@@ -1,23 +1,23 @@
 //
-//  Copyright 2023 Readium Foundation. All rights reserved.
+//  Copyright 2024 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
 
 import Combine
 import Foundation
-import R2Navigator
-import R2Shared
+import ReadiumNavigator
+import ReadiumShared
 import SwiftUI
 import UIKit
 
 /// Base class for the reader view controller of a `VisualNavigator`.
 class VisualReaderViewController<N: UIViewController & Navigator>: ReaderViewController<N>, VisualNavigatorDelegate {
-    private(set) var stackView: UIStackView!
     private lazy var positionLabel = UILabel()
 
     private let ttsViewModel: TTSViewModel?
     private let ttsControlsViewController: UIHostingController<TTSControls>?
+    private var positionCount: Int?
 
     init(
         navigator: N,
@@ -42,18 +42,17 @@ class VisualReaderViewController<N: UIViewController & Navigator>: ReaderViewCon
 
         addHighlightDecorationsObserverOnce()
         updateHighlightDecorations()
-        updatePageListDecorations()
 
-        NotificationCenter.default.addObserver(self, selector: #selector(voiceOverStatusDidChange), name: UIAccessibility.voiceOverStatusDidChangeNotification, object: nil)
+        Task {
+            self.positionCount = try? await publication.positions().get().count
+
+            await updatePageListDecorations()
+        }
     }
 
     @available(*, unavailable)
     required init?(coder aDecoder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
-    }
-
-    deinit {
-        NotificationCenter.default.removeObserver(self)
     }
 
     override func viewDidLoad() {
@@ -63,30 +62,19 @@ class VisualReaderViewController<N: UIViewController & Navigator>: ReaderViewCon
 
         updateNavigationBar(animated: false)
 
-        stackView = UIStackView(frame: view.bounds)
-        stackView.distribution = .fill
-        stackView.axis = .vertical
-        view.addSubview(stackView)
-        stackView.translatesAutoresizingMaskIntoConstraints = false
-        let topConstraint = stackView.topAnchor.constraint(equalTo: view.topAnchor)
-        // `accessibilityTopMargin` takes precedence when VoiceOver is enabled.
-        topConstraint.priority = .defaultHigh
-        NSLayoutConstraint.activate([
-            topConstraint,
-            stackView.rightAnchor.constraint(equalTo: view.rightAnchor),
-            stackView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            stackView.leftAnchor.constraint(equalTo: view.leftAnchor),
-        ])
-
         addChild(navigator)
-        stackView.addArrangedSubview(navigator.view)
+        navigator.view.frame = view.bounds
+        navigator.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view.addSubview(navigator.view)
         navigator.didMove(toParent: self)
-
-        stackView.addArrangedSubview(accessibilityToolbar)
 
         positionLabel.translatesAutoresizingMaskIntoConstraints = false
         positionLabel.font = .systemFont(ofSize: 12)
         positionLabel.textColor = .darkGray
+        // Prevents VoiceOver from selecting the position label while reading
+        // the page.
+        positionLabel.isAccessibilityElement = false
+
         view.addSubview(positionLabel)
         NSLayoutConstraint.activate([
             positionLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
@@ -95,6 +83,7 @@ class VisualReaderViewController<N: UIViewController & Navigator>: ReaderViewCon
 
         if let state = ttsViewModel?.$state, let controls = ttsControlsViewController {
             controls.view.backgroundColor = .clear
+            controls.view.isHidden = true
 
             addChild(controls)
             controls.view.translatesAutoresizingMaskIntoConstraints = false
@@ -106,6 +95,7 @@ class VisualReaderViewController<N: UIViewController & Navigator>: ReaderViewCon
             controls.didMove(toParent: self)
 
             state
+                .receive(on: DispatchQueue.main)
                 .sink { state in
                     controls.view.isHidden = !state.showControls
                 }
@@ -143,8 +133,7 @@ class VisualReaderViewController<N: UIViewController & Navigator>: ReaderViewCon
     }
 
     func updateNavigationBar(animated: Bool = true) {
-        let hidden = navigationBarHidden && !UIAccessibility.isVoiceOverRunning
-        navigationController?.setNavigationBarHidden(hidden, animated: animated)
+        navigationController?.setNavigationBarHidden(navigationBarHidden, animated: animated)
         setNeedsStatusBarAppearanceUpdate()
     }
 
@@ -153,7 +142,7 @@ class VisualReaderViewController<N: UIViewController & Navigator>: ReaderViewCon
     }
 
     override var prefersStatusBarHidden: Bool {
-        navigationBarHidden && !UIAccessibility.isVoiceOverRunning
+        navigationBarHidden
     }
 
     // MARK: - VisualNavigatorDelegate
@@ -162,8 +151,8 @@ class VisualReaderViewController<N: UIViewController & Navigator>: ReaderViewCon
         super.navigator(navigator, locationDidChange: locator)
 
         positionLabel.text = {
-            if let position = locator.locations.position {
-                return "\(position) / \(publication.positions.count)"
+            if let positionCount = positionCount, let position = locator.locations.position {
+                return "\(position) / \(positionCount)"
             } else if let progression = locator.locations.totalProgression {
                 return "\(progression)%"
             } else {
@@ -173,21 +162,25 @@ class VisualReaderViewController<N: UIViewController & Navigator>: ReaderViewCon
     }
 
     func navigator(_ navigator: VisualNavigator, didTapAt point: CGPoint) {
-        // Turn pages when tapping the edge of the screen.
-        guard !DirectionalNavigationAdapter(navigator: navigator).didTap(at: point) else {
-            return
-        }
-        // clear a current search highlight
-        if let decorator = self.navigator as? DecorableNavigator {
-            decorator.apply(decorations: [], in: "search")
-        }
+        Task {
+            // Turn pages when tapping the edge of the screen.
+            guard await !DirectionalNavigationAdapter(navigator: navigator).didTap(at: point) else {
+                return
+            }
+            // clear a current search highlight
+            if let decorator = self.navigator as? DecorableNavigator {
+                decorator.apply(decorations: [], in: "search")
+            }
 
-        toggleNavigationBar()
+            toggleNavigationBar()
+        }
     }
 
     func navigator(_ navigator: VisualNavigator, didPressKey event: KeyEvent) {
-        // Turn pages when pressing the arrow keys.
-        DirectionalNavigationAdapter(navigator: navigator).didPressKey(event: event)
+        Task {
+            // Turn pages when pressing the arrow keys.
+            await DirectionalNavigationAdapter(navigator: navigator).didPressKey(event: event)
+        }
     }
 
     // MARK: - Highlights
@@ -244,7 +237,7 @@ class VisualReaderViewController<N: UIViewController & Navigator>: ReaderViewCon
             .assertNoFailure()
             .sink { [weak self] highlights in
                 if let self = self, let decorator = self.navigator as? DecorableNavigator {
-                    let decorations = highlights.map { Decoration(id: $0.id, locator: $0.locator, style: .highlight(tint: $0.color.uiColor, isActive: false)) }
+                    let decorations = highlights.map { Decoration(id: $0.id!.string, locator: $0.locator, style: .highlight(tint: $0.color.uiColor, isActive: false)) }
                     decorator.apply(decorations: decorations, in: self.highlightDecorationGroup)
                 }
             }
@@ -254,7 +247,8 @@ class VisualReaderViewController<N: UIViewController & Navigator>: ReaderViewCon
     private func activateDecoration(_ event: OnDecorationActivatedEvent) {
         guard let highlights = highlights else { return }
 
-        currentHighlightCancellable = highlights.highlight(for: event.decoration.id).sink { _ in
+        let id = event.decoration.highlightID
+        currentHighlightCancellable = highlights.highlight(for: id).sink { _ in
         } receiveValue: { [weak self] highlight in
             guard let self = self else { return }
             self.activateDecoration(for: highlight, on: event)
@@ -271,14 +265,14 @@ class VisualReaderViewController<N: UIViewController & Navigator>: ReaderViewCon
 
         menuView.selectedColorPublisher.sink { [weak self] color in
             self?.currentHighlightCancellable?.cancel()
-            self?.updateHighlight(event.decoration.id, withColor: color)
+            self?.updateHighlight(event.decoration.highlightID, withColor: color)
             self?.highlightContextMenu?.dismiss(animated: true, completion: nil)
         }
         .store(in: &subscriptions)
 
         menuView.selectedDeletePublisher.sink { [weak self] _ in
             self?.currentHighlightCancellable?.cancel()
-            self?.deleteHighlight(event.decoration.id)
+            self?.deleteHighlight(event.decoration.highlightID)
             self?.highlightContextMenu?.dismiss(animated: true, completion: nil)
         }
         .store(in: &subscriptions)
@@ -297,51 +291,11 @@ class VisualReaderViewController<N: UIViewController & Navigator>: ReaderViewCon
             present(highlightContextMenu!, animated: true, completion: nil)
         }
     }
+}
 
-    // MARK: - Accessibility
-
-    /// Constraint used to shift the content under the navigation bar, since it is always visible when VoiceOver is running.
-    private lazy var accessibilityTopMargin: NSLayoutConstraint = self.stackView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor)
-
-    private lazy var accessibilityToolbar: UIToolbar = {
-        func makeItem(_ item: UIBarButtonItem.SystemItem, label: String? = nil, action: UIKit.Selector? = nil) -> UIBarButtonItem {
-            let button = UIBarButtonItem(barButtonSystemItem: item, target: (action != nil) ? self : nil, action: action)
-            button.accessibilityLabel = label
-            return button
-        }
-
-        let toolbar = UIToolbar(frame: .zero)
-        toolbar.items = [
-            makeItem(.flexibleSpace),
-            makeItem(.rewind, label: NSLocalizedString("reader_backward_a11y_label", comment: "Accessibility label to go backward in the publication"), action: #selector(goBackward)),
-            makeItem(.flexibleSpace),
-            makeItem(.fastForward, label: NSLocalizedString("reader_forward_a11y_label", comment: "Accessibility label to go forward in the publication"), action: #selector(goForward)),
-            makeItem(.flexibleSpace),
-        ]
-        toolbar.isHidden = !UIAccessibility.isVoiceOverRunning
-        return toolbar
-    }()
-
-    private var isVoiceOverRunning = UIAccessibility.isVoiceOverRunning
-
-    @objc private func voiceOverStatusDidChange() {
-        let isRunning = UIAccessibility.isVoiceOverRunning
-        // Avoids excessive settings refresh when the status didn't change.
-        guard isVoiceOverRunning != isRunning else {
-            return
-        }
-        isVoiceOverRunning = isRunning
-        accessibilityTopMargin.isActive = isRunning
-        accessibilityToolbar.isHidden = !isRunning
-        updateNavigationBar()
-    }
-
-    @objc private func goBackward() {
-        navigator.goBackward()
-    }
-
-    @objc private func goForward() {
-        navigator.goForward()
+extension Decoration {
+    var highlightID: Highlight.Id {
+        Highlight.Id(string: id)!
     }
 }
 
@@ -356,26 +310,28 @@ class VisualReaderViewController<N: UIViewController & Navigator>: ReaderViewCon
 extension VisualReaderViewController {
     /// Will take the `publication.pageList` and create a `Decoration` for each
     /// label.
-    private func updatePageListDecorations() {
+    private func updatePageListDecorations() async {
         guard let navigator = navigator as? DecorableNavigator else {
             return
         }
 
-        let decorations: [Decoration] = publication.pageList.enumerated().compactMap { index, link in
-            guard let title = link.title,
-                  let locator = self.publication.locate(link)
+        var decorations: [Decoration] = []
+        for (index, link) in publication.pageList.enumerated() {
+            guard
+                let title = link.title,
+                let locator = await publication.locate(link)
             else {
-                return nil
+                continue
             }
 
-            return Decoration(
+            decorations.append(Decoration(
                 id: "page-list-\(index)",
                 locator: locator,
                 style: Decoration.Style(
                     id: .pageList,
                     config: PageListConfig(label: title)
                 )
-            )
+            ))
         }
         navigator.apply(decorations: decorations, in: "page-list")
     }
