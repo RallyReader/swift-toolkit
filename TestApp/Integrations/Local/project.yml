@@ -6,7 +6,7 @@ packages:
     path: ..
   GRDB:
     url: https://github.com/groue/GRDB.swift.git
-    from: 5.8.0
+    from: 6.9.23
   Kingfisher:
     url: https://github.com/onevcat/Kingfisher.git
     from: 5.15.8
@@ -23,6 +23,10 @@ targets:
     deploymentTarget: "14.0"
     sources: 
       - path: Sources
+        excludes:
+          - Resources/Fonts
+      - path: Sources/Resources/Fonts
+        type: folder
     dependencies:
       - package: Readium
         product: R2Shared
@@ -31,9 +35,13 @@ targets:
       - package: Readium
         product: R2Navigator
       - package: Readium
+        product: ReadiumAdapterGCDWebServer
+      - package: Readium
         product: ReadiumOPDS
       - package: GRDB
       - package: Kingfisher
       - package: MBProgressHUD
       - package: SwiftSoup
+    settings:
+      DEVELOPMENT_TEAM: ${RD_DEVELOPMENT_TEAM}
 
