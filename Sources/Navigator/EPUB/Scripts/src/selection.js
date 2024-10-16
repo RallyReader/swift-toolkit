@@ -30,6 +30,28 @@ export function getCurrentSelection() {
   return { href, text, rect };
 }
 
+// We're only interested in the rect at this stage
+export function getCurrentSelectionLazy() {
+  if (!readium.link) {
+    return null;
+  }
+  const href = readium.link.href;
+  if (!href) {
+    return null;
+  }
+  const selection = window.getSelection();
+
+  if (!selection) {
+    return null;
+  }
+  const highlight = selection.toString() ?? "";
+  const before = "";
+  const after = "";
+  const text = { highlight, before, after };
+  const rect = getSelectionRect();
+  return { href, text, rect };
+}
+
 function getSelectionRect() {
   try {
     let sel = window.getSelection();
@@ -53,17 +75,36 @@ function getCurrentSelectionText() {
   if (selection.isCollapsed) {
     return undefined;
   }
-  const highlight = selection.toString();
-  const cleanHighlight = highlight
+  let highlight = selection.toString();
+
+  log(`selection highlight: ${highlight}`);
+  let cleanHighlight = highlight
     .trim()
     .replace(/\n/g, " ")
     .replace(/\s\s+/g, " ");
+
+  log(`selection clean highlight: ${cleanHighlight}`);
+
   if (cleanHighlight.length === 0) {
     return undefined;
   }
   if (!selection.anchorNode || !selection.focusNode) {
     return undefined;
   }
+
+  const range0 = window.getSelection().getRangeAt(0);
+  const element =
+    range0.commonAncestorContainer.nodeType === 1
+      ? range0.commonAncestorContainer
+      : range0.commonAncestorContainer.parentElement;
+  const style = window.getComputedStyle(element);
+  log(`opacity: ${style.opacity}`);
+
+  if (Number(style.opacity) === 0) {
+    selection.removeAllRanges();
+    return undefined;
+  }
+
   const range =
     selection.rangeCount === 1
       ? selection.getRangeAt(0)
@@ -78,27 +119,112 @@ function getCurrentSelectionText() {
     return undefined;
   }
 
-  const text = document.body.textContent;
-  const textRange = TextRange.fromRange(range).relativeTo(document.body);
-  const start = textRange.start.offset;
-  const end = textRange.end.offset;
+  return getTextFrom(highlight, range);
+}
+
+export function getTextFrom(highlight, range) {
+  // Generate the text by traversing the document and replacing <br> with \n
+  let node = document.body.firstChild;
+  let fullText = "";
+
+  function processElement(element) {
+    if (element.nodeType === Node.TEXT_NODE) {
+      fullText += element.textContent;
+    } else if (element.nodeName === "br") {
+      fullText += "\n";
+    }
+  }
+
+  function processNode(node) {
+    if (node.nodeName === "p") {
+      if (!/\s$/.test(fullText)) {
+        log(`appending new line before paragraph`);
+        fullText += "\n";
+      }
+    }
+
+    if (node.childNodes.length > 0) {
+      let child = node.firstChild;
+      while (child) {
+        processNode(child);
+        child = child.nextSibling;
+      }
+    } else {
+      processElement(node);
+    }
+  }
+
+  while (node) {
+    processNode(node);
+    node = node.nextSibling;
+  }
+
+  log(`full text: ${fullText}`);
+
+  // Now calculate offsets in the new fullText, including newline characters
+  const originalText = document.body.textContent;
+
+  // Adjust range start and end offsets by counting characters that were altered in the new text
+  let rangeStartOffset = 0;
+  let rangeEndOffset = 0;
+  let originalStart = TextRange.fromRange(range).relativeTo(document.body).start
+    .offset;
+  let originalEnd = TextRange.fromRange(range).relativeTo(document.body).end
+    .offset;
+
+  // Traverse original text and fullText at the same time to find the correct offsets
+  for (
+    let i = 0, j = 0;
+    i < originalText.length && j < fullText.length;
+    i++, j++
+  ) {
+    // Match characters between original and fullText
+    if (originalText[i] !== fullText[j]) {
+      if (fullText[j] === "\n") {
+        // Skip newline added in fullText for <br> in original HTML
+        i--; // stay at the same position in originalText
+      } else if (originalText[i] === "\n") {
+        j--; // skip newline in originalText
+      }
+    }
+
+    // Set the start and end offsets when we reach the selection start and end in the original text
+    if (i === originalStart) {
+      rangeStartOffset = j;
+    }
+    if (i === originalEnd) {
+      rangeEndOffset = j;
+      break;
+    }
+  }
 
   const snippetLength = 200;
 
-  // Compute the text before the highlight, ignoring the first "word", which might be cut.
-  let before = text.slice(Math.max(0, start - snippetLength), start);
+  // Compute the text before the highlight
+  let before = fullText.slice(
+    Math.max(0, rangeStartOffset - snippetLength),
+    rangeStartOffset
+  );
   let firstWordStart = before.search(/\P{L}\p{L}/gu);
   if (firstWordStart !== -1) {
     before = before.slice(firstWordStart + 1);
   }
 
-  // Compute the text after the highlight, ignoring the last "word", which might be cut.
-  let after = text.slice(end, Math.min(text.length, end + snippetLength));
+  // Compute the text after the highlight
+  let after = fullText.slice(
+    rangeEndOffset,
+    Math.min(fullText.length, rangeEndOffset + snippetLength)
+  );
   let lastWordEnd = Array.from(after.matchAll(/\p{L}\P{L}/gu)).pop();
   if (lastWordEnd !== undefined && lastWordEnd.index > 1) {
     after = after.slice(0, lastWordEnd.index + 1);
   }
 
+  log(`before: ${before}`);
+  log(`highlight: ${highlight}`);
+  log(`after: ${after}`);
+
+  // Return the correctly synchronized highlight, before, and after
   return { highlight, before, after };
 }
 

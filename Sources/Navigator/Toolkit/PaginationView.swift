@@ -1,11 +1,22 @@
 //
-//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Copyright 2023 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
 
 import R2Shared
 import UIKit
+
+class CustomScrollView: UIScrollView {
+    // we want to ignore top and bottom scrolling because of the spreads insets; it's causing scrolling chapter to chapter instead of inside a chapter's pages
+    // 44 pixels covers all scenarios: regular(44) and compact(20)
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        if point.y < 44 || point.y > self.frame.height-44 {
+            return nil
+        }
+        return super.hitTest(point, with: event)
+    }
+}
 
 enum PageLocation: Equatable {
     case start
@@ -97,7 +108,7 @@ final class PaginationView: UIView, Loggable {
         return orderedViews
     }
 
-    private let scrollView = UIScrollView()
+    private let scrollView = CustomScrollView()
 
     init(frame: CGRect, preloadPreviousPositionCount: Int, preloadNextPositionCount: Int) {
         self.preloadPreviousPositionCount = preloadPreviousPositionCount

@@ -1,5 +1,5 @@
 //
-//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Copyright 2023 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
@@ -26,7 +26,7 @@ open class CBZNavigatorViewController: UIViewController, VisualNavigator, Loggab
 
     private let server: HTTPServer?
     private let publicationEndpoint: HTTPServerEndpoint?
-    private var publicationBaseURL: URL!
+    private let publicationBaseURL: URL
 
     public convenience init(
         publication: Publication,
@@ -39,44 +39,29 @@ open class CBZNavigatorViewController: UIViewController, VisualNavigator, Loggab
         }
 
         let publicationEndpoint: HTTPServerEndpoint?
-        let uuidEndpoint = UUID().uuidString
-        if publication.baseURL != nil {
+        let baseURL: URL
+        if let url = publication.baseURL {
             publicationEndpoint = nil
+            baseURL = url
         } else {
-            publicationEndpoint = uuidEndpoint
+            let endpoint = UUID().uuidString
+            publicationEndpoint = endpoint
+            baseURL = try httpServer.serve(at: endpoint, publication: publication)
         }
 
         self.init(
             publication: publication,
             initialLocation: initialLocation,
             httpServer: httpServer,
-            publicationEndpoint: publicationEndpoint
+            publicationEndpoint: publicationEndpoint,
+            publicationBaseURL: baseURL
         )
-
-        if let url = publication.baseURL {
-            publicationBaseURL = url
-        } else {
-            publicationBaseURL = try httpServer.serve(
-                at: uuidEndpoint,
-                publication: publication,
-                failureHandler: { [weak self] request, error in
-                    DispatchQueue.main.async { [weak self] in
-                        guard let self = self, let href = request.href else {
-                            return
-                        }
-                        self.delegate?.navigator(self, didFailToLoadResourceAt: href, withError: error)
-                    }
-                }
-            )
-        }
-
-        publicationBaseURL = URL(string: publicationBaseURL.absoluteString.addingSuffix("/"))!
     }
 
     @available(*, deprecated, message: "See the 2.5.0 migration guide to migrate the HTTP server")
     public convenience init(publication: Publication, initialLocation: Locator? = nil) {
         precondition(!publication.isRestricted, "The provided publication is restricted. Check that any DRM was properly unlocked using a Content Protection.")
-        guard publication.baseURL != nil else {
+        guard let baseURL = publication.baseURL else {
             preconditionFailure("No base URL provided for the publication. Add it to the HTTP server.")
         }
 
@@ -84,21 +69,22 @@ open class CBZNavigatorViewController: UIViewController, VisualNavigator, Loggab
             publication: publication,
             initialLocation: initialLocation,
             httpServer: nil,
-            publicationEndpoint: nil
+            publicationEndpoint: nil,
+            publicationBaseURL: baseURL
         )
-
-        publicationBaseURL = URL(string: publicationBaseURL.absoluteString.addingSuffix("/"))!
     }
 
     private init(
         publication: Publication,
         initialLocation: Locator?,
         httpServer: HTTPServer?,
-        publicationEndpoint: HTTPServerEndpoint?
+        publicationEndpoint: HTTPServerEndpoint?,
+        publicationBaseURL: URL
     ) {
         self.publication = publication
         server = httpServer
         self.publicationEndpoint = publicationEndpoint
+        self.publicationBaseURL = URL(string: publicationBaseURL.absoluteString.addingSuffix("/"))!
 
         initialIndex = {
             guard let initialLocation = initialLocation, let initialIndex = publication.readingOrder.firstIndex(withHREF: initialLocation.href) else {

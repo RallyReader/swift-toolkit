@@ -1,5 +1,5 @@
 //
-//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Copyright 2023 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
@@ -16,7 +16,7 @@ public protocol DecorableNavigator {
     /// submit the updated list of decorations when there are changes.
     /// Name each decoration group as you see fit. A good practice is to use the name of the feature requiring
     /// decorations, e.g. `annotation`, `search`, `tts`, etc.
-    func apply(decorations: [Decoration], in group: String)
+    func apply(decorations: [Decoration], enhanced: Bool, in group: String)
 
     /// Indicates whether the Navigator supports the given decoration `style`.
     ///
@@ -29,9 +29,23 @@ public protocol DecorableNavigator {
     ///
     /// - Parameter onActivated: Called when the user activates the decoration, e.g. with a click or tap.
     func observeDecorationInteractions(inGroup group: String, onActivated: OnActivatedCallback?)
+    
+    func observeDecorationRectCalculations(inGroup group: String, onActivated: OnRectCalculatedCallback?)
 
     /// Called when the user activates a decoration, e.g. with a click or tap.
     typealias OnActivatedCallback = (_ event: OnDecorationActivatedEvent) -> Void
+    
+    /// Called when a decoration rect is calculated
+    typealias OnRectCalculatedCallback = (_ event: OnDecorationRectEvent) -> Void
+    
+    /// Adds additional decorations in the given decoration `group`.
+    ///
+    /// This does not refresh the existing list from the specified `group`
+    /// It is used to append decorations with the same efficiency even when the group gets big
+    func addDecorations(decorations: [Decoration], enhanced: Bool, in group: String, completion: @escaping () -> Void)
+    
+    
+    func remove(decoration: Decoration, in group: String)
 }
 
 /// Holds the metadata about a decoration activation interaction.
@@ -46,6 +60,17 @@ public struct OnDecorationActivatedEvent {
     /// Event point of the interaction, in the coordinate of the navigator view. This is only useful in the context of a
     /// VisualNavigator.
     public let point: CGPoint?
+}
+
+/// Holds the metadata about a decoration activation interaction.
+public struct OnDecorationRectEvent {
+    /// Activated decoration.
+    public let decorationId: Decoration.Id
+    /// Name of the group the decoration belongs to.
+    public let group: String
+    /// Frame of the bounding rect for the decoration, in the coordinate of the navigator view. This is only useful in
+    /// the context of a VisualNavigator.
+    public let rect: CGRect?
 }
 
 public extension DecorableNavigator {

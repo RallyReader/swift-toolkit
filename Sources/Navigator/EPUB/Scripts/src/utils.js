@@ -7,7 +7,50 @@
 // Catch JS errors to log them in the app.
 
 import { TextQuoteAnchor } from "./vendor/hypothesis/anchoring/types";
-import { getCurrentSelection } from "./selection";
+import {
+  getCurrentSelection,
+  getCurrentSelectionLazy,
+  getTextFrom,
+} from "./selection";
+import { getClientRectsNoOverlap, toNativeRect } from "./rect";
+
+/**
+ * Least Recently Used Cache with a limit wraping a Map object
+ * The LRUCache constructor takes a limit argument which specifies the maximum number of items the cache can hold.
+ * The get method removes and re-adds an item to ensure it's marked as the most recently used.
+ * The set method checks the size of the cache, and removes the least recently used item if necessary before adding the new item.
+ * The clear method clears the cache.
+ */
+class LRUCache {
+  constructor(limit = 100) {
+    // Default limit of 100 items
+    this.limit = limit;
+    this.map = new Map();
+  }
+
+  get(key) {
+    if (!this.map.has(key)) return undefined;
+
+    // Remove and re-add to ensure this item is the most recently used
+    const value = this.map.get(key);
+    this.map.delete(key);
+    this.map.set(key, value);
+    return value;
+  }
+
+  set(key, value) {
+    if (this.map.size >= this.limit) {
+      // Remove the least recently used item
+      const firstKey = this.map.keys().next().value;
+      this.map.delete(firstKey);
+    }
+    this.map.set(key, value);
+  }
+
+  clear() {
+    this.map.clear();
+  }
+}
 
 window.addEventListener(
   "error",
@@ -111,7 +154,21 @@ window.addEventListener("scroll", function () {
 document.addEventListener(
   "selectionchange",
   debounce(50, function () {
-    webkit.messageHandlers.selectionChanged.postMessage(getCurrentSelection());
+    const currentSelection = getCurrentSelectionLazy();
+    log(`did calculate current selection`);
+    webkit.messageHandlers.selectionRectChanged.postMessage(currentSelection);
+  })
+);
+
+// This is temporary fix; not ideal
+// First we read the rect so that the gesture does not timeout
+// Calculating the Text can take a long time in big chapters on slow devices
+document.addEventListener(
+  "selectionchange",
+  debounce(100, function () {
+    const currentSelection = getCurrentSelection();
+    log(`did calculate current selection`);
+    webkit.messageHandlers.selectionChanged.postMessage(currentSelection);
   })
 );
 
@@ -182,6 +239,298 @@ export function scrollToText(text) {
   return scrollToRange(range);
 }
 
+export function rectFromLocator(locator) {
+  let range = rangeFromLocator(locator);
+  if (!range) {
+    return null;
+  }
+  return toNativeRect(range.getBoundingClientRect());
+}
+
+let rectsCache = new LRUCache(10);
+export function clientRectFromLocator(locator, reset, cache) {
+  const key = JSON.stringify(locator);
+  let nativeRect = rectsCache.get(key);
+
+  if (nativeRect !== undefined && reset === 0) {
+    log("return cached rect");
+    return nativeRect;
+  }
+  let range = rangeFromLocator(locator);
+  if (!range) {
+    return null;
+  }
+  const clientRects = getClientRectsNoOverlap(range, true);
+  const rect = clientRects[0];
+  nativeRect = toNativeRect(rect);
+
+  if (cache === 1) {
+    rectsCache.set(key, nativeRect);
+  }
+
+  return nativeRect;
+}
+
+export function calculateHorizontalPageRanges() {
+  const rangeData = {};
+  let node = document.body.firstChild;
+  let currentPage = 0;
+  let rangeIndex = 0;
+  let pageWidth = window.innerWidth;
+
+  // const pagesPerRange = 2;
+  let currentTextLength = 0;
+  const minCharactersPerRange = 1000;
+  let previousElementRect = new DOMRect(0, 0, 0, 0);
+
+  function processElement(element) {
+    log("node name " + element.nodeName);
+    log("<" + element.textContent + ">");
+
+    let rect;
+
+    let processText = false;
+    if (element.nodeType === Node.TEXT_NODE) {
+      if (/\S/.test(element.textContent)) {
+        processText = true;
+        let range = document.createRange();
+        range.selectNode(element);
+        rect = range.getBoundingClientRect();
+      } else {
+        log("node text does not have text");
+        addTextToRange(element.textContent, rangeIndex);
+      }
+    } else if (
+      element.nodeType === Node.ELEMENT_NODE &&
+      element.textContent.length > 0
+    ) {
+      processText = true;
+      rect = element.getBoundingClientRect();
+    } else if (element.nodeName === "br") {
+      log(`adding br as new line`);
+      addTextToRange("\n", rangeIndex);
+    }
+
+    if (processText) {
+      rect.x += window.scrollX;
+
+      log("rect x: " + rect.x);
+      log("rext width: " + rect.width);
+      log("current page: " + currentPage);
+      log("current text length: " + currentTextLength);
+      log("current page x: " + currentPage * pageWidth);
+      log("next page x: " + (currentPage + 1) * pageWidth);
+
+      if (rect.x > (currentPage + 1) * pageWidth) {
+        const additionalPages = Math.floor(rect.x / pageWidth - currentPage);
+        currentPage = currentPage + additionalPages;
+        log("increase current page: " + currentPage);
+
+        log("previous rect x: " + previousElementRect.x);
+        log("previous rect width: " + previousElementRect.width);
+
+        // if previousElementRect.x + previousElementRect.width is more than curent page x+width, then we compare with next next page max x
+
+        let maxX = previousElementRect.x + previousElementRect.width;
+        if (maxX > (currentPage + 1) * pageWidth) {
+          maxX = (currentPage + 1) * pageWidth + pageWidth;
+        }
+        if (currentTextLength >= minCharactersPerRange && maxX < rect.x) {
+          rangeIndex++;
+          // currentTextLength = 0;
+          log("increase range index: " + rangeIndex);
+          currentTextLength = element.textContent.length;
+          addTextToRange(element.textContent, rangeIndex);
+          previousElementRect = rect;
+          return;
+        }
+      }
+
+      if (
+        currentTextLength >= minCharactersPerRange &&
+        rect.x + rect.width > (currentPage + 1) * pageWidth
+      ) {
+        log("paragraph does not fit on current page");
+        processTextContent(element, element.textContent);
+      } else {
+        // if (
+        //   currentTextLength + element.textContent.length >
+        //   minCharactersPerRange
+        // ) {
+        //   log("paragraph is too big; analyze words");
+        //   processTextContent(element, element.textContent);
+        // } else {
+        log("add entire paragraph");
+        currentTextLength += element.textContent.length;
+        addTextToRange(element.textContent, rangeIndex);
+        // }
+      }
+
+      previousElementRect = rect;
+    }
+  }
+
+  function processTextContent(element, textContent) {
+    // Split the text by spaces or dashes, and keep the delimiters
+    let words = textContent.split(/(\s|[-–—―‒])/g).filter(Boolean); // Split on spaces or dashes, keeping them as separate tokens
+    let removedText = "";
+    let removedWord = "";
+    let firstPoppedElement = true;
+    let remainderDoesNotFitOnNextPage = false;
+
+    let wordBoundingRect = new DOMRect(
+      Number.MAX_VALUE, // we use the max possible value for 'x' to make sure it enters the 'while' iterator
+      0,
+      0,
+      0
+    );
+
+    // Reduce the element text until it fits the page height
+    while (
+      wordBoundingRect.x + wordBoundingRect.width >
+        (currentPage + 1) * pageWidth &&
+      words.length > 0
+    ) {
+      removedWord = words.pop(); // Remove the last word or delimiter
+
+      log("word: <" + removedWord + ">");
+
+      if (removedWord === " ") {
+        removedText = removedWord + removedText;
+      } else {
+        try {
+          let anchor = new TextQuoteAnchor(element, removedWord, {
+            prefix: words.join(""), // Join without adding any additional characters
+            suffix: removedText.length > 0 ? removedText : "",
+          });
+
+          // log("anchor prefix: " + anchor.context.prefix);
+          // log("anchor suffix: " + anchor.context.suffix);
+          // log("anchor highlight: " + anchor.exact);
+
+          wordBoundingRect = anchor.toRange().getBoundingClientRect();
+          wordBoundingRect.x += window.scrollX;
+          log("word rect x: " + wordBoundingRect.x);
+          log("word rect width: " + wordBoundingRect.width);
+          log("current page max x: " + (currentPage + 1) * pageWidth);
+
+          if (
+            wordBoundingRect.x + wordBoundingRect.width >
+            (currentPage + 1) * pageWidth
+          ) {
+            removedText = removedWord + removedText;
+          }
+
+          if (firstPoppedElement) {
+            if (wordBoundingRect.x > (currentPage + 2) * pageWidth) {
+              log("text does not fit on the next page");
+              remainderDoesNotFitOnNextPage = true;
+            }
+          }
+
+          firstPoppedElement = false;
+        } catch {
+          log("could not find range for word");
+          // if (removedWord === "") {
+          //     removedText = removedText;
+          // }
+        }
+      }
+    }
+
+    // If after removing all words it still doesn't fit, start on a new page
+    if (
+      words.length === 0 &&
+      wordBoundingRect.x > (currentPage + 1) * pageWidth
+    ) {
+      // This should never happen!!!
+      log("this should never happen");
+      rangeIndex += 1;
+      currentPage += 1; // Move to the next page
+      //TODO the element must go through the regular processing in this case
+      currentTextLength = textContent.length;
+      addTextToRange(textContent, rangeIndex);
+    } else {
+      words.push(removedWord);
+
+      addTextToRange(words.join(""), rangeIndex);
+      currentPage += 1;
+      rangeIndex += 1;
+
+      // TODO do we need to also check the current text length here????
+      if (remainderDoesNotFitOnNextPage) {
+        log("remainderDoesNotFitOnNextPage");
+        // processTextContent(element, removedText);
+      }
+      // else {
+      currentTextLength = removedText.length;
+      addTextToRange(removedText, rangeIndex);
+      // }
+    }
+  }
+
+  function addTextToRange(text, range) {
+    const existingText = rangeData[range.toString()];
+    if (existingText !== undefined) {
+      const newText = existingText + text;
+      rangeData[range.toString()] = newText;
+    } else {
+      rangeData[range.toString()] = text;
+    }
+
+    log("adding text: <" + text + ">");
+    log("to range index: " + range);
+  }
+
+  function processNode(node) {
+    log(`process node with name : ${node.nodeName} and type: ${node.nodeType}`);
+
+    // Disabling this until we find a way to integrate this in the app;
+
+    // if (node.nodeType === Node.ELEMENT_NODE && node.textContent.length > 0) {
+    //   // Check the opacity of the element
+    //   let computedStyle = window.getComputedStyle(node);
+    //   let opacity = computedStyle.opacity;
+
+    //   if (opacity === "0") {
+    //     log(`Element has opacity 0, skipping processing: ${node.textContent}`);
+    //     return;
+    //   }
+    // }
+
+    // log("process node <" + node.textContent + ">");
+
+    const keys = Object.keys(rangeData);
+
+    if (node.nodeName === "p" && keys.length > 0) {
+      const lastKey = keys[keys.length - 1];
+      const lastItem = rangeData[lastKey];
+      if (!/\s$/.test(lastItem)) {
+        log(`appending new line before paragraph`);
+        addTextToRange("\n", rangeIndex);
+      }
+    }
+
+    if (node.childNodes.length > 0) {
+      let child = node.firstChild;
+      while (child) {
+        // log("<         1         >");
+        processNode(child);
+        child = child.nextSibling;
+      }
+    } else {
+      processElement(node);
+    }
+  }
+
+  while (node) {
+    processNode(node);
+    node = node.nextSibling;
+  }
+
+  return rangeData;
+}
+
 function scrollToRange(range) {
   return scrollToRect(range.getBoundingClientRect());
 }
@@ -246,6 +595,100 @@ function snapCurrentPosition() {
   document.scrollingElement.scrollLeft = currentOffsetSnapped;
 }
 
+// Cache the higher level css elements range for faster calculating the word by word dom ranges
+let elementRangeCache = new LRUCache(10); // Key: cssSelector, Value: entire element range
+
+// Caches the css element range
+function cacheElementRange(cssSelector) {
+  const element = document.querySelector(cssSelector);
+  if (element) {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    elementRangeCache.set(cssSelector, range);
+  }
+}
+
+// Returns a range from a locator; it first searches for the higher level css element in the cache
+function rangeFromCachedLocator(locator) {
+  const cssSelector = locator.locations.cssSelector;
+  const entireRange = elementRangeCache.get(cssSelector);
+  if (!entireRange) {
+    cacheElementRange(cssSelector);
+    return rangeFromCachedLocator(locator);
+  }
+
+  const entireText = entireRange.toString();
+  let startIndex = 0;
+  let foundIndex = -1;
+
+  while (startIndex < entireText.length) {
+    const highlightIndex = entireText.indexOf(
+      locator.text.highlight,
+      startIndex
+    );
+    if (highlightIndex === -1) {
+      break; // No more occurrences of highlight text
+    }
+
+    const beforeText = locator.text.before
+      ? entireText.slice(
+          Math.max(0, highlightIndex - locator.text.before.length),
+          highlightIndex
+        )
+      : "";
+    const afterText = locator.text.after
+      ? entireText.slice(
+          highlightIndex + locator.text.highlight.length,
+          highlightIndex +
+            locator.text.highlight.length +
+            locator.text.after.length
+        )
+      : "";
+
+    const beforeTextMatches =
+      !locator.text.before || locator.text.before.endsWith(beforeText);
+    const afterTextMatches =
+      !locator.text.after || locator.text.after.startsWith(afterText);
+
+    if (beforeTextMatches && afterTextMatches) {
+      // Highlight text from locator was found
+      foundIndex = highlightIndex;
+      break;
+    }
+
+    // Update startIndex for next iteration to search for next occurrence of highlight text
+    startIndex = highlightIndex + 1;
+  }
+
+  if (foundIndex === -1) {
+    throw new Error("Locator range could not be calculated");
+  }
+
+  const highlightStartIndex = foundIndex;
+  const highlightEndIndex = foundIndex + locator.text.highlight.length;
+
+  const subRange = document.createRange();
+  let count = 0;
+  let node;
+  const nodeIterator = document.createNodeIterator(
+    entireRange.commonAncestorContainer, // This should be a Document or DocumentFragment node
+    NodeFilter.SHOW_TEXT
+  );
+
+  for (node = nodeIterator.nextNode(); node; node = nodeIterator.nextNode()) {
+    const nodeEndIndex = count + node.nodeValue.length;
+    if (nodeEndIndex > startIndex) {
+      break;
+    }
+    count = nodeEndIndex;
+  }
+
+  subRange.setStart(node, highlightStartIndex - count);
+  subRange.setEnd(node, highlightEndIndex - count);
+
+  return subRange;
+}
+
 export function rangeFromLocator(locator) {
   try {
     let locations = locator.locations;
@@ -253,10 +696,30 @@ export function rangeFromLocator(locator) {
     if (text && text.highlight) {
       var root;
       if (locations && locations.cssSelector) {
-        root = document.querySelector(locations.cssSelector);
+        try {
+          const range = rangeFromCachedLocator(locator);
+          return range;
+        } catch {
+          log("failed getting the range from css selector");
+          // root = document.querySelector(locations.cssSelector);
+        }
       }
+
       if (!root) {
         root = document.body;
+      }
+
+      let start = null;
+      let end = null;
+
+      if (locations) {
+        // If there is info about the start and end positions from the client, use that
+
+        if (locations.start !== undefined && locations.end !== undefined) {
+          log(`actual start and end: [${locations.start}, ${locations.end}]`);
+          start = Math.max(locations.start - 5, 0);
+          end = Math.min(locations.end + 5, root.textContent.length);
+        }
       }
 
       let anchor = new TextQuoteAnchor(root, text.highlight, {
@@ -264,7 +727,8 @@ export function rangeFromLocator(locator) {
         suffix: text.after,
       });
 
-      return anchor.toRange();
+      log(`approximate start and end: [${start}, ${end}]`);
+      return anchor.toRange({}, start, end);
     }
 
     if (locations) {
@@ -295,6 +759,65 @@ export function rangeFromLocator(locator) {
   }
 
   return null;
+}
+
+export function getFirstVisibleWordText() {
+  const range = document.createRange();
+  const nodeIterator = document.createNodeIterator(
+    document.body,
+    NodeFilter.SHOW_TEXT,
+    {
+      acceptNode: function (node) {
+        // Only accept text nodes that are not empty
+        if (node.nodeValue.trim().length > 0) {
+          range.selectNodeContents(node);
+          const rect = range.getBoundingClientRect();
+
+          // Check if any part of the rect is within the viewport (horizontal and vertical)
+          if (
+            rect.right > 0 &&
+            rect.left < window.innerWidth &&
+            rect.bottom > 0 &&
+            rect.top < window.innerHeight
+          ) {
+            return NodeFilter.FILTER_ACCEPT;
+          }
+        }
+        return NodeFilter.FILTER_REJECT;
+      },
+    }
+  );
+
+  let documentNode;
+  while ((documentNode = nodeIterator.nextNode())) {
+    const words = documentNode.nodeValue.trim().split(/\s+/);
+    if (words.length > 0) {
+      // Loop through each word to find the first visible word within the viewport
+      for (let i = 0; i < words.length; i++) {
+        const wordIndex = documentNode.nodeValue.indexOf(words[i]);
+
+        // Create a range for each word
+        const wordRange = document.createRange();
+        wordRange.setStart(documentNode, wordIndex);
+        wordRange.setEnd(documentNode, wordIndex + words[i].length);
+
+        const wordRect = wordRange.getBoundingClientRect();
+
+        // Check if the word is within the current viewport
+        if (
+          wordRect.right > 0 &&
+          wordRect.left < window.innerWidth &&
+          wordRect.bottom > 0 &&
+          wordRect.top < window.innerHeight
+        ) {
+          // Return the locator for the first visible word
+          return { text: getTextFrom(words[i], wordRange) };
+        }
+      }
+    }
+  }
+
+  return null; // Return null if no visible word is found
 }
 
 /// User Settings.
