@@ -1,95 +1,101 @@
 //
-//  Copyright 2020 Readium Foundation. All rights reserved.
+//  Copyright 2024 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
 
 import Foundation
+import ReadiumShared
+@testable import ReadiumStreamer
 import XCTest
-import R2Shared
-@testable import R2Streamer
 
 class AudioLocatorServiceTests: XCTestCase {
+    func testLocateLocatorMatchingReadingOrderHREF() async {
+        let service = makeService(readingOrder: [
+            Link(href: "l1"),
+            Link(href: "l2"),
+        ])
 
-    func testLocateLocatorMatchingReadingOrderHREF() {
+        let locator = Locator(href: "l1", mediaType: .mp3, locations: .init(totalProgression: 0.53))
+        let result = await service.locate(locator)
+        XCTAssertEqual(result, locator)
+    }
+
+    func testLocateLocatorReturnsNilIfNoMatch() async {
         let service = makeService(readingOrder: [
             Link(href: "l1"),
-            Link(href: "l2")
+            Link(href: "l2"),
         ])
-        
-        let locator = Locator(href: "l1", type: "audio/mpeg", locations: .init(totalProgression: 0.53))
-        XCTAssertEqual(service.locate(locator), locator)
+
+        let locator = Locator(href: "l3", mediaType: .mp3, locations: .init(totalProgression: 0.53))
+        let result = await service.locate(locator)
+        XCTAssertNil(result)
     }
-    
-    func testLocateLocatorReturnsNilIfNoMatch() {
+
+    func testLocateLocatorUsesTotalProgression() async {
         let service = makeService(readingOrder: [
-            Link(href: "l1"),
-            Link(href: "l2")
+            Link(href: "l1", mediaType: .mp3, duration: 100),
+            Link(href: "l2", mediaType: .mp3, duration: 100),
         ])
-        
-        let locator = Locator(href: "l3", type: "audio/mpeg", locations: .init(totalProgression: 0.53))
-        XCTAssertNil(service.locate(locator))
-    }
-    
-    func testLocateLocatorUsesTotalProgression() {
-        let service = makeService(readingOrder: [
-            Link(href: "l1", type: "audio/mpeg", duration: 100),
-            Link(href: "l2", type: "audio/mpeg", duration: 100)
-        ])
-    
+
+        var result = await service.locate(Locator(href: "wrong", mediaType: .mp3, locations: .init(totalProgression: 0.49)))
         XCTAssertEqual(
-            service.locate(Locator(href: "wrong", type: "audio/mpeg", locations: .init(totalProgression: 0.49))),
-            Locator(href: "l1", type: "audio/mpeg", locations: .init(
+            result,
+            Locator(href: "l1", mediaType: .mp3, locations: .init(
                 fragments: ["t=98"],
-                progression: 98/100.0,
+                progression: 98 / 100.0,
                 totalProgression: 0.49
             ))
         )
-    
+
+        result = await service.locate(Locator(href: "wrong", mediaType: .mp3, locations: .init(totalProgression: 0.5)))
         XCTAssertEqual(
-            service.locate(Locator(href: "wrong", type: "audio/mpeg", locations: .init(totalProgression: 0.5))),
-            Locator(href: "l2", type: "audio/mpeg", locations: .init(
+            result,
+            Locator(href: "l2", mediaType: .mp3, locations: .init(
                 fragments: ["t=0"],
                 progression: 0,
                 totalProgression: 0.5
             ))
         )
-    
+
+        result = await service.locate(Locator(href: "wrong", mediaType: .mp3, locations: .init(totalProgression: 0.51)))
         XCTAssertEqual(
-            service.locate(Locator(href: "wrong", type: "audio/mpeg", locations: .init(totalProgression: 0.51))),
-            Locator(href: "l2", type: "audio/mpeg", locations: .init(
+            result,
+            Locator(href: "l2", mediaType: .mp3, locations: .init(
                 fragments: ["t=2"],
                 progression: 0.02,
                 totalProgression: 0.51
             ))
         )
     }
-    
-    func testLocateLocatorUsingTotalProgressionKeepsTitleAndText() {
+
+    func testLocateLocatorUsingTotalProgressionKeepsTitleAndText() async {
         let service = makeService(readingOrder: [
-            Link(href: "l1", type: "audio/mpeg", duration: 100),
-            Link(href: "l2", type: "audio/mpeg", duration: 100)
+            Link(href: "l1", mediaType: .mp3, duration: 100),
+            Link(href: "l2", mediaType: .mp3, duration: 100),
         ])
-    
+
+        let result = await service.locate(
+            Locator(
+                href: "wrong",
+                mediaType: MediaType("text/plain")!,
+                title: "Title",
+                locations: .init(
+                    fragments: ["ignored"],
+                    progression: 0.5,
+                    totalProgression: 0.4,
+                    position: 42,
+                    otherLocations: ["other": "location"]
+                ),
+                text: .init(after: "after", before: "before", highlight: "highlight")
+            )
+        )
+
         XCTAssertEqual(
-            service.locate(
-                Locator(
-                    href: "wrong",
-                    type: "wrong-type",
-                    title: "Title",
-                    locations: .init(
-                        fragments: ["ignored"],
-                        progression: 0.5,
-                        totalProgression: 0.4,
-                        position: 42,
-                        otherLocations: ["other": "location"]
-                    ),
-                    text: .init(after: "after", before: "before", highlight: "highlight")
-                )
-            ),
+            result,
             Locator(
                 href: "l1",
-                type: "audio/mpeg",
+                mediaType: .mp3,
                 title: "Title",
                 locations: .init(
                     fragments: ["t=80"],
@@ -100,69 +106,77 @@ class AudioLocatorServiceTests: XCTestCase {
             )
         )
     }
-    
-    func testLocateProgression() {
+
+    func testLocateProgression() async {
         let service = makeService(readingOrder: [
-            Link(href: "l1", type: "audio/mpeg", duration: 100),
-            Link(href: "l2", type: "audio/mpeg", duration: 100)
+            Link(href: "l1", mediaType: .mp3, duration: 100),
+            Link(href: "l2", mediaType: .mp3, duration: 100),
         ])
-    
+
+        var result = await service.locate(progression: 0)
         XCTAssertEqual(
-            service.locate(progression: 0),
-            Locator(href: "l1", type: "audio/mpeg", locations: .init(
+            result,
+            Locator(href: "l1", mediaType: .mp3, locations: .init(
                 fragments: ["t=0"],
                 progression: 0,
                 totalProgression: 0
             ))
         )
-    
+
+        result = await service.locate(progression: 0.49)
         XCTAssertEqual(
-            service.locate(progression: 0.49),
-            Locator(href: "l1", type: "audio/mpeg", locations: .init(
+            result,
+            Locator(href: "l1", mediaType: .mp3, locations: .init(
                 fragments: ["t=98"],
-                progression: 98/100.0,
+                progression: 98 / 100.0,
                 totalProgression: 0.49
             ))
         )
-    
+
+        result = await service.locate(progression: 0.5)
         XCTAssertEqual(
-            service.locate(progression: 0.5),
-            Locator(href: "l2", type: "audio/mpeg", locations: .init(
+            result,
+            Locator(href: "l2", mediaType: .mp3, locations: .init(
                 fragments: ["t=0"],
                 progression: 0,
                 totalProgression: 0.5
             ))
         )
-    
+
+        result = await service.locate(progression: 0.51)
         XCTAssertEqual(
-            service.locate(progression: 0.51),
-            Locator(href: "l2", type: "audio/mpeg", locations: .init(
+            result,
+            Locator(href: "l2", mediaType: .mp3, locations: .init(
                 fragments: ["t=2"],
                 progression: 0.02,
                 totalProgression: 0.51
             ))
         )
-    
+
+        result = await service.locate(progression: 1)
         XCTAssertEqual(
-            service.locate(progression: 1),
-            Locator(href: "l2", type: "audio/mpeg", locations: .init(
+            result,
+            Locator(href: "l2", mediaType: .mp3, locations: .init(
                 fragments: ["t=100"],
                 progression: 1,
                 totalProgression: 1
             ))
         )
     }
-    
-    func testLocateInvalidProgression() {
+
+    func testLocateInvalidProgression() async {
         let service = makeService(readingOrder: [
-            Link(href: "l1", type: "audio/mpeg", duration: 100),
-            Link(href: "l2", type: "audio/mpeg", duration: 100)
+            Link(href: "l1", mediaType: .mp3, duration: 100),
+            Link(href: "l2", mediaType: .mp3, duration: 100),
         ])
-    
-        XCTAssertNil(service.locate(progression: -0.5))
-        XCTAssertNil(service.locate(progression: 1.5))
+
+        var result = await service.locate(progression: -0.5)
+        XCTAssertNil(result)
+
+        result = await service.locate(progression: 1.5)
+        XCTAssertNil(result)
     }
-    
+
     private func makeService(readingOrder: [Link]) -> AudioLocatorService {
         AudioLocatorService(
             publication: _Strong(Publication(
@@ -170,5 +184,4 @@ class AudioLocatorServiceTests: XCTestCase {
             ))
         )
     }
-    
 }

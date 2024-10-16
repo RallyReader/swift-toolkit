@@ -1,5 +1,5 @@
 //
-//  Copyright 2020 Readium Foundation. All rights reserved.
+//  Copyright 2024 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
@@ -13,56 +13,53 @@ import PDFKit
 /// If this is an issue for you, use `CPDFDocumentFactory` instead.
 ///
 /// Use `PDFKitPDFDocumentFactory` to create a `PDFDocument` from a `Resource`.
-@available(iOS 11.0, *)
 extension PDFKit.PDFDocument: PDFDocument {
-    
-    public var identifier: String? { documentRef?.identifier }
+    public func pageCount() async throws -> Int { pageCount }
 
-    public var cover: UIImage? { documentRef?.cover }
-    
-    public var readingProgression: ReadingProgression? { documentRef?.readingProgression }
-    
-    public var title: String? { documentRef?.title }
-    
-    public var author: String? { documentRef?.author }
-    
-    public var subject: String? { documentRef?.subject }
-    
-    public var keywords: [String] { documentRef?.keywords ?? [] }
-    
-    public var tableOfContents: [PDFOutlineNode] { documentRef?.tableOfContents ?? [] }
+    public func identifier() async throws -> String? { try await documentRef?.identifier() }
 
+    public func cover() async throws -> UIImage? { try await documentRef?.cover() }
+
+    public func readingProgression() async throws -> ReadingProgression? { try await documentRef?.readingProgression() }
+
+    public func title() async throws -> String? { try await documentRef?.title() }
+
+    public func author() async throws -> String? { try await documentRef?.author() }
+
+    public func subject() async throws -> String? { try await documentRef?.subject() }
+
+    public func keywords() async throws -> [String] { try await documentRef?.keywords() ?? [] }
+
+    public func tableOfContents() async throws -> [PDFOutlineNode] { try await documentRef?.tableOfContents() ?? [] }
 }
 
 /// Creates a `PDFDocument` using PDFKit.
-@available(iOS 11.0, *)
 public class PDFKitPDFDocumentFactory: PDFDocumentFactory {
-    
-    public func open(url: URL, password: String?) throws -> PDFDocument {
-        guard let document = PDFKit.PDFDocument(url: url) else {
+    public func open(file: FileURL, password: String?) async throws -> PDFDocument {
+        guard let document = PDFKit.PDFDocument(url: file.url) else {
             throw PDFDocumentError.openFailed
         }
-        
+
         return try open(document: document, password: password)
     }
-    
-    public func open(resource: Resource, password: String?) throws -> PDFDocument {
-        if let url = resource.file {
-            return try open(url: url, password: password)
+
+    public func open<HREF: URLConvertible>(resource: Resource, at href: HREF, password: String?) async throws -> PDFDocument {
+        if let file = resource.sourceURL?.fileURL {
+            return try await open(file: file, password: password)
         }
-        
+
         // Unfortunately, PDFKit doesn't support streams, so we need to load the full document in
         // memory. If this is an issue for you, use `CPDFDocumentFactory` instead.
         guard
-            let data = try? resource.read().get(),
+            let data = try? await resource.read().get(),
             let document = PDFKit.PDFDocument(data: data)
         else {
             throw PDFDocumentError.openFailed
         }
-        
+
         return try open(document: document, password: password)
     }
-    
+
     private func open(document: PDFKit.PDFDocument, password: String?) throws -> PDFDocument {
         if document.isLocked {
             guard
@@ -72,8 +69,7 @@ public class PDFKitPDFDocumentFactory: PDFDocumentFactory {
                 throw PDFDocumentError.invalidPassword
             }
         }
-        
+
         return document
     }
-    
 }

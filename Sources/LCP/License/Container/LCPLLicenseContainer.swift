@@ -1,42 +1,36 @@
 //
-//  LCPLLicenseContainer.swift
-//  r2-lcp-swift
-//
-//  Created by Mickaël Menu on 05.02.19.
-//
-//  Copyright 2019 Readium Foundation. All rights reserved.
-//  Use of this source code is governed by a BSD-style license which is detailed
-//  in the LICENSE file present in the project repository where this source code is maintained.
+//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Use of this source code is governed by the BSD-style license
+//  available in the top-level LICENSE file of the project.
 //
 
 import Foundation
+import ReadiumShared
 
 /// Access to a License Document packaged as a standalone LCPL file.
 final class LCPLLicenseContainer: LicenseContainer {
-    
-    private let lcpl: URL
-    
-    init(lcpl: URL) {
+    private let lcpl: FileURL
+
+    init(lcpl: FileURL) {
         self.lcpl = lcpl
     }
-    
-    func containsLicense() -> Bool {
-        return true
+
+    func containsLicense() async throws -> Bool {
+        true
     }
-    
-    func read() throws -> Data {
-        guard let data = try? Data(contentsOf: lcpl) else {
+
+    func read() async throws -> Data {
+        guard let data = try? Data(contentsOf: lcpl.url) else {
             throw LCPError.licenseContainer(.readFailed(path: "."))
         }
         return data
     }
-    
-    func write(_ license: LicenseDocument) throws {
+
+    func write(_ license: LicenseDocument) async throws {
         do {
-            try license.data.write(to: lcpl, options: .atomic)
+            try license.jsonData.write(to: lcpl.url, options: .atomic)
         } catch {
             throw LCPError.licenseContainer(.writeFailed(path: "."))
         }
     }
-
 }

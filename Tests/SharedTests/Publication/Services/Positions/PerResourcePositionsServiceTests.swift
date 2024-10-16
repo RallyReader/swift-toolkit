@@ -1,55 +1,52 @@
 //
-//  PerResourcePositionsServiceTests.swift
-//  r2-shared-swift
-//
-//  Created by Mickaël Menu on 01/06/2020.
-//
-//  Copyright 2020 Readium Foundation. All rights reserved.
-//  Use of this source code is governed by a BSD-style license which is detailed
-//  in the LICENSE file present in the project repository where this source code is maintained.
+//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Use of this source code is governed by the BSD-style license
+//  available in the top-level LICENSE file of the project.
 //
 
+@testable import ReadiumShared
 import XCTest
-@testable import R2Shared
 
 class PerResourcePositionsServiceTests: XCTestCase {
-
-    func testFromAnEmptyReadingOrder() {
-        let service = PerResourcePositionsService(readingOrder: [], fallbackMediaType: "")
-        XCTAssertEqual(service.positionsByReadingOrder, [])
+    func testFromAnEmptyReadingOrder() async {
+        let service = PerResourcePositionsService(readingOrder: [], fallbackMediaType: .text)
+        let result = await service.positionsByReadingOrder()
+        XCTAssertEqual(result, .success([]))
     }
-    
-    func testFromReadingOrderWithOneResource() {
+
+    func testFromReadingOrderWithOneResource() async {
         let service = PerResourcePositionsService(readingOrder: [
-            Link(href: "res", type: "image/png")
-        ], fallbackMediaType: "")
-        
-        XCTAssertEqual(service.positionsByReadingOrder, [
+            Link(href: "res", mediaType: .png),
+        ], fallbackMediaType: .text)
+
+        let result = await service.positionsByReadingOrder()
+        XCTAssertEqual(result, .success([
             [Locator(
                 href: "res",
-                type: "image/png",
+                mediaType: .png,
                 locations: Locator.Locations(
                     totalProgression: 0.0,
                     position: 1
                 )
-            )]
-        ])
+            )],
+        ]))
     }
-    
-    func testFromReadingOrderWithFewResources() {
+
+    func testFromReadingOrderWithFewResources() async {
         let service = PerResourcePositionsService(
             readingOrder: [
                 Link(href: "res"),
-                Link(href: "chap1", type: "image/png"),
-                Link(href: "chap2", type: "image/png", title: "Chapter 2")
+                Link(href: "chap1", mediaType: .png),
+                Link(href: "chap2", mediaType: .png, title: "Chapter 2"),
             ],
-            fallbackMediaType: ""
+            fallbackMediaType: .text
         )
 
-        XCTAssertEqual(service.positionsByReadingOrder, [
+        let result = await service.positionsByReadingOrder()
+        XCTAssertEqual(result, .success([
             [Locator(
                 href: "res",
-                type: "",
+                mediaType: .text,
                 locations: Locator.Locations(
                     totalProgression: 0.0,
                     position: 1
@@ -57,40 +54,40 @@ class PerResourcePositionsServiceTests: XCTestCase {
             )],
             [Locator(
                 href: "chap1",
-                type: "image/png",
+                mediaType: .png,
                 locations: Locator.Locations(
-                    totalProgression: 1.0/3.0,
+                    totalProgression: 1.0 / 3.0,
                     position: 2
                 )
             )],
             [Locator(
                 href: "chap2",
-                type: "image/png",
+                mediaType: .png,
                 title: "Chapter 2",
                 locations: Locator.Locations(
-                    totalProgression: 2.0/3.0,
+                    totalProgression: 2.0 / 3.0,
                     position: 3
                 )
-            )]
-        ])
+            )],
+        ]))
     }
-    
-    func testFallsBackOnGivenMediaType() {
+
+    func testFallsBackOnGivenMediaType() async {
         let services = PerResourcePositionsService(
             readingOrder: [Link(href: "res")],
-            fallbackMediaType: "image/*"
+            fallbackMediaType: MediaType("image/*")!
         )
 
-        XCTAssertEqual(services.positionsByReadingOrder, [[
+        let result = await services.positionsByReadingOrder()
+        XCTAssertEqual(result, .success([[
             Locator(
                 href: "res",
-                type: "image/*",
+                mediaType: MediaType("image/*")!,
                 locations: Locator.Locations(
                     totalProgression: 0.0,
                     position: 1
                 )
-            )
-        ]])
+            ),
+        ]]))
     }
-
 }

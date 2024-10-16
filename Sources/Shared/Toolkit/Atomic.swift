@@ -1,5 +1,5 @@
 //
-//  Copyright 2022 Readium Foundation. All rights reserved.
+//  Copyright 2024 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
@@ -30,12 +30,12 @@ import Foundation
 @propertyWrapper
 public final class Atomic<Value> {
     private var value: Value
-    
+
     /// Queue used to protect accesses to `value`.
     ///
     /// We could use a serial queue but that would impact performances as concurrent reads would not be
     /// possible. To make sure we don't get data races, writes are done using a `.barrier` flag.
-    private let queue = DispatchQueue(label: "org.readium.Atomic", attributes: .concurrent)
+    private let queue = DispatchQueue(label: "org.readium.swift-toolkit.Atomic", attributes: .concurrent)
 
     public init(wrappedValue value: Value) {
         self.value = value
@@ -45,9 +45,9 @@ public final class Atomic<Value> {
         get { read() }
         set { fatalError("Use $property.write { $0 = ... } to mutate this property") }
     }
-    
+
     public var projectedValue: Atomic<Value> {
-        return self
+        self
     }
 
     /// Reads the current value synchronously.
@@ -56,14 +56,14 @@ public final class Atomic<Value> {
             value
         }
     }
-    
+
     /// Reads the current value asynchronously.
     public func read(completion: @escaping (Value) -> Void) {
         queue.async {
             completion(self.value)
         }
     }
-    
+
     /// Writes the value synchronously in a safe way.
     public func write(_ changes: (inout Value) -> Void) {
         // The `barrier` flag here guarantees that we will never have a

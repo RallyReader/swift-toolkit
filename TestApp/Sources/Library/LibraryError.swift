@@ -1,43 +1,45 @@
 //
-//  LibraryError.swift
-//  r2-testapp-swift
-//
-//  Created by Mickaël Menu on 12.06.19.
-//
-//  Copyright 2019 European Digital Reading Lab. All rights reserved.
-//  Licensed to the Readium Foundation under one or more contributor license agreements.
-//  Use of this source code is governed by a BSD-style license which is detailed in the
-//  LICENSE file present in the project repository where this source code is maintained.
+//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Use of this source code is governed by the BSD-style license
+//  available in the top-level LICENSE file of the project.
 //
 
 import Foundation
-import R2Shared
+import ReadiumShared
 
-enum LibraryError: LocalizedError {
-    
+enum LibraryError: Error {
     case publicationIsNotValid
     case bookNotFound
     case bookDeletionFailed(Error?)
     case importFailed(Error)
+    case publicationIsRestricted(Error)
     case openFailed(Error)
-    case downloadFailed(Error)
-    case cancelled
+    case downloadFailed(Error?)
+}
 
-    var errorDescription: String? {
-        switch self {
-        case .publicationIsNotValid:
-            return NSLocalizedString("library_error_publicationIsNotValid", comment: "Error message used when trying to import a publication that is not valid")
-        case .bookNotFound:
-            return NSLocalizedString("library_error_bookNotFound", comment: "Error message used when trying to open a book whose file is not found")
-        case .importFailed(let error):
-            return String(format: NSLocalizedString("library_error_importFailed", comment: "Error message used when a low-level error occured while importing a publication"), error.localizedDescription)
-        case .openFailed(let error):
-            return String(format: NSLocalizedString("library_error_openFailed", comment: "Error message used when a low-level error occured while opening a publication"), error.localizedDescription)
-        case .downloadFailed(let error):
-            return String(format: NSLocalizedString("library_error_downloadFailed", comment: "Error message when the download of a publication failed"), error.localizedDescription)
-        default:
-            return nil
+extension LibraryError: UserErrorConvertible {
+    func userError() -> UserError {
+        UserError(cause: self) {
+            switch self {
+            case .publicationIsNotValid:
+                return "library_error_publicationIsNotValid".localized
+            case .bookNotFound:
+                return "library_error_bookNotFound".localized
+            case .importFailed:
+                return "library_error_importFailed".localized
+            case .openFailed:
+                return "library_error_openFailed".localized
+            case .downloadFailed:
+                return "library_error_downloadFailed".localized
+            case .bookDeletionFailed:
+                return "library_error_bookDeletionFailed".localized
+            case let .publicationIsRestricted(error):
+                if let error = error as? UserErrorConvertible {
+                    return error.userError().message
+                } else {
+                    return "library_error_publicationIsRestricted".localized
+                }
+            }
         }
     }
-
 }

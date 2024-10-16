@@ -1,47 +1,41 @@
 //
-//  EPUBContainerParser.swift
-//  r2-streamer-swift
-//
-//  Created by Mickaël Menu on 03.06.19.
-//
-//  Copyright 2018 Readium Foundation. All rights reserved.
-//  Use of this source code is governed by a BSD-style license which is detailed
-//  in the LICENSE file present in the project repository where this source code is maintained.
+//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Use of this source code is governed by the BSD-style license
+//  available in the top-level LICENSE file of the project.
 //
 
 import Foundation
 import Fuzi
-import R2Shared
-
+import ReadiumShared
 
 /// A parser for the META-INF/container.xml file.
 final class EPUBContainerParser: Loggable {
-    
     private let document: Fuzi.XMLDocument
 
     init(data: Data) throws {
-        self.document = try XMLDocument(data: data)
-        self.document.definePrefix("cn", forNamespace: "urn:oasis:names:tc:opendocument:xmlns:container")
+        document = try XMLDocument(data: data)
+        document.definePrefix("cn", forNamespace: "urn:oasis:names:tc:opendocument:xmlns:container")
     }
-    
-    convenience init(fetcher: Fetcher) throws {
-        let href = "/META-INF/container.xml"
-        do {
-            let data = try fetcher.readData(at: href)
-            try self.init(data: data)
-        } catch {
+
+    convenience init(container: Container) async throws {
+        let href = "META-INF/container.xml"
+        guard let data = try? await container.readData(at: AnyURL(string: href)!) else {
             throw EPUBParserError.missingFile(path: href)
         }
+        try self.init(data: data)
     }
-    
+
     /// Parses the container.xml file and retrieves the relative path to the OPF file (rootFilePath)
     /// (the default one for now, not handling multiple renditions).
-    func parseOPFHREF() throws -> String {
+    func parseOPFHREF() throws -> RelativeURL {
         // Get the path of the OPF file, relative to the metadata.rootPath.
-        guard let path = document.firstChild(xpath: "/cn:container/cn:rootfiles/cn:rootfile")?.attr("full-path") else {
+        guard let uri = document
+            .firstChild(xpath: "/cn:container/cn:rootfiles/cn:rootfile")?
+            .attr("full-path")
+            .flatMap(RelativeURL.init(epubHREF:))
+        else {
             throw EPUBParserError.missingRootfile
         }
-        return path.addingPrefix("/")
+        return uri
     }
-    
 }

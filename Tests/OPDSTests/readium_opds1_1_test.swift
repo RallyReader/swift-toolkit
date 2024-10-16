@@ -1,21 +1,19 @@
 //
-//  readium_opdsTests.swift
-//  readium-opdsTests
-//
-//  Created by Alexandre Camilleri on 10/27/17.
-//  Copyright © 2017 Readium. All rights reserved.
+//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Use of this source code is governed by the BSD-style license
+//  available in the top-level LICENSE file of the project.
 //
 
 import XCTest
 
-import R2Shared
+import ReadiumShared
 
 @testable import ReadiumOPDS
 
 #if !SWIFT_PACKAGE
-extension Bundle {
-    static let module = Bundle(for: readium_opds1_1_test.self)
-}
+    extension Bundle {
+        static let module = Bundle(for: readium_opds1_1_test.self)
+    }
 #endif
 
 class readium_opds1_1_test: XCTestCase {
@@ -41,7 +39,7 @@ class readium_opds1_1_test: XCTestCase {
 
         continueAfterFailure = true
     }
-    
+
     override func tearDown() {
         // Put teardown code here. This method is called after the invocation of each test method in the class.
         super.tearDown()
@@ -55,7 +53,7 @@ class readium_opds1_1_test: XCTestCase {
     func testLinks() {
         XCTAssertEqual(feed.links.count, 4)
         XCTAssertEqual(feed.links[0].rels, ["related"])
-        XCTAssertEqual(feed.links[1].type, "application/atom+xml;profile=opds-catalog;kind=acquisition")
+        XCTAssertEqual(feed.links[1].mediaType, MediaType("application/atom+xml;profile=opds-catalog;kind=acquisition")!)
         XCTAssertEqual(feed.links[2].href, "http://test.com/opds-catalogs/root.xml")
         // TODO: add more tests...
     }

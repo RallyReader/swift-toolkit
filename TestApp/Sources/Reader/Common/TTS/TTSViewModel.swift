@@ -1,16 +1,16 @@
 //
-//  Copyright 2021 Readium Foundation. All rights reserved.
+//  Copyright 2024 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
 
 import Combine
 import Foundation
-import R2Navigator
-import R2Shared
+import MediaPlayer
+import ReadiumNavigator
+import ReadiumShared
 
 final class TTSViewModel: ObservableObject, Loggable {
-
     struct State: Equatable {
         /// Whether the TTS was enabled by the user.
         var showControls: Bool = false
@@ -30,15 +30,15 @@ final class TTSViewModel: ObservableObject, Loggable {
             let voicesByLanguage: [Language: [TTSVoice]] =
                 Dictionary(grouping: synthesizer.availableVoices, by: \.language)
 
-            self.config = synthesizer.config
-            self.availableLanguages = voicesByLanguage.keys.sorted { $0.localizedDescription() < $1.localizedDescription() }
-            self.availableVoiceIds = synthesizer.config.defaultLanguage
-                .flatMap { voicesByLanguage[$0]?.map { $0.identifier } }
+            config = synthesizer.config
+            availableLanguages = voicesByLanguage.keys.sorted { $0.localizedDescription() < $1.localizedDescription() }
+            availableVoiceIds = synthesizer.config.defaultLanguage
+                .flatMap { voicesByLanguage[$0]?.map(\.identifier) }
                 ?? []
         }
     }
 
-    @Published private(set) var state: State = State()
+    @Published private(set) var state: State = .init()
     @Published private(set) var settings: Settings
 
     private let publication: Publication
@@ -48,6 +48,8 @@ final class TTSViewModel: ObservableObject, Loggable {
     @Published private var playingUtterance: Locator?
     private let playingWordRangeSubject = PassthroughSubject<Locator, Never>()
 
+    private var isMoving = false
+
     private var subscriptions: Set<AnyCancellable> = []
 
     init?(navigator: Navigator, publication: Publication) {
@@ -55,7 +57,7 @@ final class TTSViewModel: ObservableObject, Loggable {
             return nil
         }
         self.synthesizer = synthesizer
-        self.settings = Settings(synthesizer: synthesizer)
+        settings = Settings(synthesizer: synthesizer)
         self.navigator = navigator
         self.publication = publication
 
@@ -81,15 +83,20 @@ final class TTSViewModel: ObservableObject, Loggable {
 
         // Navigate to the currently spoken utterance word.
         // This will automatically turn pages when needed.
-        var isMoving = false
         playingWordRangeSubject
             .removeDuplicates()
             //  Improve performances by throttling the moves to maximum one per second.
             .throttle(for: 1, scheduler: RunLoop.main, latest: true)
-            .drop(while: { _ in isMoving })
-            .sink { locator in
-                isMoving = navigator.go(to: locator) {
-                    isMoving = false
+            .drop(while: { [weak self] _ in self?.isMoving ?? true })
+            .sink { [weak self] locator in
+                guard let self = self else {
+                    return
+                }
+
+                isMoving = true
+                Task {
+                    await navigator.go(to: locator)
+                    self.isMoving = false
                 }
             }
             .store(in: &subscriptions)
@@ -106,13 +113,17 @@ final class TTSViewModel: ObservableObject, Loggable {
 
     @objc func start() {
         if let navigator = navigator as? VisualNavigator {
-            // Gets the locator of the element at the top of the page.
-            navigator.firstVisibleElementLocator { [self] locator in
-                synthesizer.start(from: locator)
+            Task {
+                // Gets the locator of the element at the top of the page.
+                if let locator = await navigator.firstVisibleElementLocator() {
+                    synthesizer.start(from: locator)
+                }
             }
         } else {
             synthesizer.start(from: navigator.currentLocation)
         }
+
+        setupNowPlaying()
     }
 
     @objc func stop() {
@@ -134,16 +145,42 @@ final class TTSViewModel: ObservableObject, Loggable {
     @objc func next() {
         synthesizer.next()
     }
+
+    // MARK: - Now Playing
+
+    // This will display the publication in the Control Center and support
+    // external controls.
+
+    private func setupNowPlaying() {
+        Task {
+            NowPlayingInfo.shared.media = await .init(
+                title: publication.metadata.title ?? "",
+                artist: publication.metadata.authors.map(\.name).joined(separator: ", "),
+                artwork: try? publication.cover().get()
+            )
+        }
+
+        let commandCenter = MPRemoteCommandCenter.shared()
+
+        commandCenter.togglePlayPauseCommand.addTarget { [weak self] _ in
+            self?.pauseOrResume()
+            return .success
+        }
+    }
+
+    private func clearNowPlaying() {
+        NowPlayingInfo.shared.clear()
+    }
 }
 
 extension TTSViewModel: PublicationSpeechSynthesizerDelegate {
-
     public func publicationSpeechSynthesizer(_ synthesizer: PublicationSpeechSynthesizer, stateDidChange synthesizerState: PublicationSpeechSynthesizer.State) {
         switch synthesizerState {
         case .stopped:
             state.showControls = false
             state.isPlaying = false
             playingUtterance = nil
+            clearNowPlaying()
 
         case let .playing(utterance, range: wordRange):
             state.showControls = true

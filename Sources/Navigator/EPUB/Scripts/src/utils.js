@@ -27,6 +27,7 @@ window.addEventListener(
   function () {
     const observer = new ResizeObserver(() => {
       appendVirtualColumnIfNeeded();
+      onScroll();
     });
     observer.observe(document.body);
 
@@ -79,7 +80,9 @@ function update(position) {
   webkit.messageHandlers.progressionChanged.postMessage(positionString);
 }
 
-window.addEventListener("scroll", function () {
+window.addEventListener("scroll", onScroll);
+
+function onScroll() {
   last_known_scrollY_position =
     window.scrollY / document.scrollingElement.scrollHeight;
   // Using Math.abs because for RTL books, the value will be negative.
@@ -106,7 +109,7 @@ window.addEventListener("scroll", function () {
     });
   }
   ticking = true;
-});
+}
 
 document.addEventListener(
   "selectionchange",
@@ -131,12 +134,8 @@ export function getColumnCountPerScreen() {
 }
 
 export function isScrollModeEnabled() {
-  return (
-    document.documentElement.style
-      .getPropertyValue("--USER__scroll")
-      .toString()
-      .trim() === "readium-scroll-on"
-  );
+  const style = document.documentElement.style;
+  return style.getPropertyValue("--USER__view").trim() == "readium-scroll-on";
 }
 
 // Scroll to the given TagId in document and snap.
@@ -172,10 +171,10 @@ export function scrollToPosition(position, dir) {
 
 // Scrolls to the first occurrence of the given text snippet.
 //
-// The expected text argument is a Locator Text object, as defined here:
+// The expected text argument is a Locator object, as defined here:
 // https://readium.org/architecture/models/locators/
-export function scrollToText(text) {
-  let range = rangeFromLocator({ text });
+export function scrollToLocator(locator) {
+  let range = rangeFromLocator(locator);
   if (!range) {
     return false;
   }
@@ -188,8 +187,7 @@ function scrollToRange(range) {
 
 function scrollToRect(rect) {
   if (isScrollModeEnabled()) {
-    document.scrollingElement.scrollTop =
-      rect.top + window.scrollY - window.innerHeight / 2;
+    document.scrollingElement.scrollTop = rect.top + window.scrollY;
   } else {
     document.scrollingElement.scrollLeft = snapOffset(
       rect.left + window.scrollX
@@ -248,37 +246,74 @@ function snapCurrentPosition() {
 }
 
 export function rangeFromLocator(locator) {
-  let text = locator.text;
-  if (!text || !text.highlight) {
-    return null;
-  }
   try {
-    var root;
     let locations = locator.locations;
-    if (locations && locations.cssSelector) {
-      root = document.querySelector(locations.cssSelector);
+    let text = locator.text;
+    if (text && text.highlight) {
+      var root;
+      if (locations && locations.cssSelector) {
+        root = document.querySelector(locations.cssSelector);
+      }
+      if (!root) {
+        root = document.body;
+      }
+
+      let anchor = new TextQuoteAnchor(root, text.highlight, {
+        prefix: text.before,
+        suffix: text.after,
+      });
+
+      return anchor.toRange();
     }
-    if (!root) {
-      root = document.body;
+
+    if (locations) {
+      var element = null;
+
+      if (!element && locations.cssSelector) {
+        element = document.querySelector(locations.cssSelector);
+      }
+
+      if (!element && locations.fragments) {
+        for (const htmlId of locations.fragments) {
+          element = document.getElementById(htmlId);
+          if (element) {
+            break;
+          }
+        }
+      }
+
+      if (element) {
+        let range = document.createRange();
+        range.setStartBefore(element);
+        range.setEndAfter(element);
+        return range;
+      }
     }
-    let anchor = new TextQuoteAnchor(root, text.highlight, {
-      prefix: text.before,
-      suffix: text.after,
-    });
-    return anchor.toRange();
   } catch (e) {
     logError(e);
-    return null;
   }
+
+  return null;
 }
 
 /// User Settings.
 
+export function setCSSProperties(properties) {
+  for (const name in properties) {
+    setProperty(name, properties[name]);
+  }
+}
+
 // For setting user setting.
 export function setProperty(key, value) {
-  var root = document.documentElement;
-
-  root.style.setProperty(key, value);
+  if (value === null) {
+    removeProperty(key);
+  } else {
+    var root = document.documentElement;
+    // The `!important` annotation is added with `setProperty()` because if
+    // it's part of the `value`, it will be ignored by the Web View.
+    root.style.setProperty(key, value, "important");
+  }
 }
 
 // For removing user setting.

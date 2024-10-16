@@ -1,15 +1,14 @@
 //
-//  Copyright 2020 Readium Foundation. All rights reserved.
+//  Copyright 2024 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
 
 import Foundation
-import R2Shared
+import ReadiumShared
 
 /// Locator service for audio publications.
 final class AudioLocatorService: DefaultLocatorService {
-
     static func makeFactory() -> (PublicationServiceContext) -> AudioLocatorService {
         { context in AudioLocatorService(publication: context.publication) }
     }
@@ -27,21 +26,21 @@ final class AudioLocatorService: DefaultLocatorService {
         return (totalDuration > 0) ? totalDuration : nil
     }()
 
-    override func locate(progression: Double) -> Locator? {
+    override func locate(progression: Double) async -> Locator? {
         guard let totalDuration = totalDuration else {
             return nil
         }
-        
+
         let positionInPublication = progression * totalDuration
         guard let (link, resourcePosition) = readingOrderItemAtPosition(positionInPublication) else {
             return nil
         }
-        
+
         let positionInResource = positionInPublication - resourcePosition
-        
+
         return Locator(
-            href: link.href,
-            type: link.type ?? MediaType.binary.string,
+            href: link.url(),
+            mediaType: link.mediaType ?? .binary,
             locations: .init(
                 fragments: ["t=\(Int(positionInResource))"],
                 progression: link.duration.map { duration in
@@ -62,18 +61,17 @@ final class AudioLocatorService: DefaultLocatorService {
         var current: Double = 0
         for (i, duration) in durations.enumerated() {
             let link = readingOrder[i]
-            if current..<current+duration ~= position {
+            if current ..< current + duration ~= position {
                 return (link, startPosition: current)
             }
-            
+
             current += duration
         }
-        
+
         if position == totalDuration, let link = readingOrder.last {
             return (link, startPosition: current - (link.duration ?? 0))
         }
-    
+
         return nil
     }
-    
 }
