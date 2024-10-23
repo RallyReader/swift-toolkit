@@ -58,3 +58,5 @@ out/
 
 /Readium.xcodeproj
 /Derived
+/node_modules
+/yarn.lock
