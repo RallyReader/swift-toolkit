@@ -52,6 +52,14 @@ export function registerTemplates(newStyles) {
     }
   `;
   document.head.appendChild(containStyle);
+
+  let imgStyle = document.createElement("style");
+  imgStyle.innerHTML = `
+    img {
+        pointer-events: none;
+    }
+  `;
+  document.head.appendChild(imgStyle);
 }
 
 /**
