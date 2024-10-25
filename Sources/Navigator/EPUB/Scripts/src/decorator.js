@@ -48,6 +48,7 @@ export function registerTemplates(newStyles) {
       position: absolute;
       width: 100%;
       height: 100%;
+      top: 0px;
     }
   `;
   document.head.appendChild(containStyle);
@@ -378,10 +379,10 @@ export function DecorationGroup(groupId, groupName) {
     let scrollingElement = document.scrollingElement;
     let yOffset = scrollingElement.scrollTop;
 
-    log(`visible area :: bounding rect left: ${boundingRect.left}`);
-    log(`visible area :: page index: ${pageIndex}`);
-    log(`visible area :: viewport width: ${viewportWidth}`);
-    log(`visible area :: window screen x: ${window.scrollX}`);
+    // log(`visible area :: bounding rect left: ${boundingRect.left}`);
+    // log(`visible area :: page index: ${pageIndex}`);
+    // log(`visible area :: viewport width: ${viewportWidth}`);
+    // log(`visible area :: window screen x: ${window.scrollX}`);
 
     log(`yoffset: ${yOffset}`);
 
@@ -495,15 +496,6 @@ export function DecorationGroup(groupId, groupName) {
     let visibleAreaLeft = pageIndex * viewportWidth; // Each page is one viewport width in size
     let visibleAreaId = `visible-area-${pageIndex}`;
 
-    //const yOffset = 0; //window.innerHeight - document.documentElement.scrollHeight;
-    let yOffset = window.innerHeight - document.documentElement.scrollHeight;
-
-    log(`yoffset: ${yOffset}`);
-
-    if (yOffset < -300) {
-      yOffset = 0;
-    }
-
     let newArea = false;
     let visibleArea = null;
 
@@ -526,7 +518,8 @@ export function DecorationGroup(groupId, groupName) {
         visibleArea.setAttribute("id", visibleAreaId);
         visibleArea.style.position = "absolute";
         visibleArea.style.left = `${visibleAreaLeft}px`;
-        visibleArea.style.top = `${yOffset}px`;
+        visibleArea.style.top = `0px !important`; //`${yOffset}px`;
+        visibleArea.style.marginTop = `0px`;
         visibleArea.style.width = `${viewportWidth}px`;
         visibleArea.style.height = `${window.innerHeight}px`;
         visibleArea.style.pointerEvents = "none"; // Allow interactions to pass through
@@ -534,15 +527,6 @@ export function DecorationGroup(groupId, groupName) {
 
         newArea = true;
       }
-    }
-
-    if (
-      visibleArea.style.top != 0 &&
-      yOffset != 0 &&
-      visibleArea.style.top != yOffset
-    ) {
-      log(`window top offset: ${yOffset}`);
-      visibleArea.style.top = `${yOffset}px`;
     }
 
     return { visibleArea: visibleArea, new: newArea };
