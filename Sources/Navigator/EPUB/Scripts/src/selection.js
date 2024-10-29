@@ -92,18 +92,18 @@ function getCurrentSelectionText() {
     return undefined;
   }
 
-  const range0 = window.getSelection().getRangeAt(0);
-  const element =
-    range0.commonAncestorContainer.nodeType === 1
-      ? range0.commonAncestorContainer
-      : range0.commonAncestorContainer.parentElement;
-  const style = window.getComputedStyle(element);
-  log(`opacity: ${style.opacity}`);
-
-  if (Number(style.opacity) === 0) {
-    selection.removeAllRanges();
-    return undefined;
-  }
+  // const range0 = window.getSelection().getRangeAt(0);
+  // const element =
+  //   range0.commonAncestorContainer.nodeType === 1
+  //     ? range0.commonAncestorContainer
+  //     : range0.commonAncestorContainer.parentElement;
+  // const style = window.getComputedStyle(element);
+  // log(`opacity: ${style.opacity}`);
+  //
+  // if (Number(style.opacity) === 0) {
+  //   selection.removeAllRanges();
+  //   return undefined;
+  // }
 
   const range =
     selection.rangeCount === 1
