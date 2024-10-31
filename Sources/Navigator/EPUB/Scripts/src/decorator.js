@@ -49,7 +49,6 @@ export function registerTemplates(newStyles) {
       width: 100%;
       height: 100%;
       top: 0px;
-      background-color: rgba(1,1,1,0.3);
     }
   `;
   document.head.appendChild(containStyle);
