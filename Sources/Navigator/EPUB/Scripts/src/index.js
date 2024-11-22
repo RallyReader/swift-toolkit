@@ -22,6 +22,7 @@ import {
   clientRectFromLocator,
   calculateHorizontalPageRanges,
   getFirstVisibleWordText,
+  getLastVisibleWordText,
 } from "./utils";
 import { getDecorations, registerTemplates } from "./decorator";
 
@@ -40,6 +41,7 @@ global.readium = {
   clientRectFromLocator: clientRectFromLocator,
   calculateHorizontalPageRanges: calculateHorizontalPageRanges,
   getFirstVisibleWordText: getFirstVisibleWordText,
+  getLastVisibleWordText: getLastVisibleWordText,
   // decoration
   registerDecorationTemplates: registerTemplates,
   getDecorations: getDecorations,

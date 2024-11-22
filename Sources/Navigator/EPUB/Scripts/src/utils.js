@@ -820,6 +820,72 @@ export function getFirstVisibleWordText() {
   return null; // Return null if no visible word is found
 }
 
+export function getLastVisibleWordText() {
+  const range = document.createRange();
+  const nodeIterator = document.createNodeIterator(
+    document.body,
+    NodeFilter.SHOW_TEXT,
+    {
+      acceptNode: function (node) {
+        // Only accept text nodes that are not empty
+        if (node.nodeValue.trim().length > 0) {
+          range.selectNodeContents(node);
+          const rect = range.getBoundingClientRect();
+
+          // Check if any part of the rect is within the viewport (horizontal and vertical)
+          if (
+            rect.right > 0 &&
+            rect.left < window.innerWidth &&
+            rect.bottom > 0 &&
+            rect.top < window.innerHeight
+          ) {
+            return NodeFilter.FILTER_ACCEPT;
+          }
+        }
+        return NodeFilter.FILTER_REJECT;
+      },
+    }
+  );
+
+  // Convert the iterator to an array and reverse it to iterate from the end
+  const textNodes = [];
+  let documentNode;
+  while ((documentNode = nodeIterator.nextNode())) {
+    textNodes.push(documentNode);
+  }
+
+  for (let i = textNodes.length - 1; i >= 0; i--) {
+    const documentNode = textNodes[i];
+    const words = documentNode.nodeValue.trim().split(/\s+/);
+    if (words.length > 0) {
+      // Loop through each word in reverse to find the last visible word within the viewport
+      for (let j = words.length - 1; j >= 0; j--) {
+        const wordIndex = documentNode.nodeValue.lastIndexOf(words[j]);
+
+        // Create a range for each word
+        const wordRange = document.createRange();
+        wordRange.setStart(documentNode, wordIndex);
+        wordRange.setEnd(documentNode, wordIndex + words[j].length);
+
+        const wordRect = wordRange.getBoundingClientRect();
+
+        // Check if the word is within the current viewport
+        if (
+          wordRect.right > 0 &&
+          wordRect.left < window.innerWidth &&
+          wordRect.bottom > 0 &&
+          wordRect.top < window.innerHeight
+        ) {
+          // Return the locator for the last visible word
+          return { text: getTextFrom(words[j], wordRange) };
+        }
+      }
+    }
+  }
+
+  return null; // Return null if no visible word is found
+}
+
 /// User Settings.
 
 export function setCSSProperties(properties) {
