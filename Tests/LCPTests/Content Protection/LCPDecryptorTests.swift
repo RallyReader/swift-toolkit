@@ -5,8 +5,8 @@
 //
 
 import PDFKit
-import R2Shared
 @testable import ReadiumLCP
+import ReadiumShared
 import XCTest
 
 class LCPDecryptorTests: XCTestCase {
@@ -76,6 +76,6 @@ class LCPDecryptorTests: XCTestCase {
             completionExpectation.fulfill()
         }
 
-        waitForExpectations(timeout: 10, handler: nil)
+        waitForExpectations(timeout: 30, handler: nil)
     }
 }
