@@ -748,12 +748,15 @@ open class EPUBNavigatorViewController: UIViewController,
             return
         }
         
-        let spreadView = loadedSpreadView(forHREF: locator.href)
-        let script = "readium.clientRectFromLocator(\(locatorJson), \(reset ? 1 : 0), \(cache ? 1 : 0))"
-        spreadView?.evaluateScript(script, inHREF: locator.href, completion: { result in
+        Task {
+            let spreadView = loadedSpreadViewForHREF(locator.href)
+            let script = "readium.clientRectFromLocator(\(locatorJson), \(reset ? 1 : 0), \(cache ? 1 : 0))"
+            
+            let result = await spreadView?.evaluateScript(script, inHREF: locator.href)
+            
             DispatchQueue.main.async {
                 do {
-                    let readiumResult = try result.get()
+                    let readiumResult = try result?.get()
                     if let frame = CGRect(json: readiumResult) {
                         print("[FRAME] :: word rect: \(frame)")
                         
@@ -770,18 +773,20 @@ open class EPUBNavigatorViewController: UIViewController,
                     completion(nil)
                 }
             }
-        })
+        }
     }
     
     public func getPageRanges(_ href: String, completion: @escaping ([String]) -> Void) {
-        if let spreadView = loadedSpreadView(forHREF: href) {
-            let script = "readium.calculateHorizontalPageRanges()"
-            let date = Date()
-            spreadView.evaluateScript(script, inHREF: href, completion: { result in
+        Task {
+            if let hrefURL = AnyURL(string: href), let spreadView = loadedSpreadViewForHREF(hrefURL) {
+                let script = "readium.calculateHorizontalPageRanges()"
+                let date = Date()
+                let result = await spreadView.evaluateScript(script, inHREF: hrefURL)
+                
                 var pages = [String]()
                 do {
                     let readiumResult = try result.get()
-//                    self.log(.debug, "ranges result: \(readiumResult)")
+                    //                    self.log(.debug, "ranges result: \(readiumResult)")
                     print("[RANGES] :: got pages in \(-date.timeIntervalSinceNow)")
                     if let json = readiumResult as? [String:String] {
                         let keys = json.keys.sorted(by: {Int($0) ?? 0 < Int($1) ?? 0})
@@ -800,21 +805,26 @@ open class EPUBNavigatorViewController: UIViewController,
                 DispatchQueue.main.async {
                     completion(pages)
                 }
-            })
-        } else {
-            completion([])
+            } else {
+                completion([])
+            }
         }
     }
     
     public func getFirstWordLocatorFromVisiblePage(href: String, completion: @escaping (Locator?) -> Void) {
-        if let spreadView = loadedSpreadView(forHREF: href) {
+        guard let hrefURL = AnyURL(string: href) else {
+            completion(nil)
+            return
+        }
+        if let spreadView = loadedSpreadViewForHREF(hrefURL) {
             let script = "readium.getFirstVisibleWordText()"
-            spreadView.evaluateScript(script, inHREF: href, completion: { result in
+            Task {
+                let result = await spreadView.evaluateScript(script, inHREF: hrefURL)
                 do {
                     let readiumResult = try result.get()
                     if let selection = readiumResult as? [String: Any],
                        let text = try? Locator.Text(json: selection["text"]) {
-                        let locator = Locator(href: href, type: "text/html", text: text)
+                        let locator = Locator(href: hrefURL, mediaType: .html, text: text)
                         completion(locator)
                     } else {
                         completion(nil)
@@ -823,21 +833,29 @@ open class EPUBNavigatorViewController: UIViewController,
                     self.log(.error, error)
                     completion(nil)
                 }
-            })
+                
+            }
         } else {
             completion(nil)
         }
+            
     }
     
     public func getLastWordLocatorFromVisiblePage(href: String, completion: @escaping (Locator?) -> Void) {
-        if let spreadView = loadedSpreadView(forHREF: href) {
+        guard let hrefURL = AnyURL(string: href) else {
+            completion(nil)
+            return
+        }
+        
+        if let spreadView = loadedSpreadViewForHREF(hrefURL) {
             let script = "readium.getLastVisibleWordText()"
-            spreadView.evaluateScript(script, inHREF: href, completion: { result in
+            Task {
+                let result = await spreadView.evaluateScript(script, inHREF: hrefURL)
                 do {
                     let readiumResult = try result.get()
                     if let selection = readiumResult as? [String: Any],
                        let text = try? Locator.Text(json: selection["text"]) {
-                        let locator = Locator(href: href, type: "text/html", text: text)
+                        let locator = Locator(href: hrefURL, mediaType: .html, text: text)
                         completion(locator)
                     } else {
                         completion(nil)
@@ -846,7 +864,7 @@ open class EPUBNavigatorViewController: UIViewController,
                     self.log(.error, error)
                     completion(nil)
                 }
-            })
+            }
         } else {
             completion(nil)
         }
@@ -865,7 +883,10 @@ open class EPUBNavigatorViewController: UIViewController,
     }
     
     public func scrollViewInsideSpreadView(forHREF href: String) -> UIScrollView? {
-        let spreadView = loadedSpreadView(forHREF: href)
+        guard let hrefURL = AnyURL(string: href) else {
+            return nil
+        }
+        let spreadView = loadedSpreadViewForHREF(hrefURL)
         return spreadView?.scrollView
     }
     
@@ -938,29 +959,42 @@ open class EPUBNavigatorViewController: UIViewController,
     }
     
     public func remove(decoration: Decoration, in group: String) {
-        var decorationsIsGroup = self.decorations[group]
-        decorationsIsGroup?.removeAll(where: {$0.decoration.id == decoration.id})
-        self.decorations[group] = decorationsIsGroup
-        
-        let script = "requestAnimationFrame(function () { readium.getDecorations('\(group)').clearEnhanced('\(decoration.id)'); });"
-        self.loadedSpreadView(forHREF: decoration.locator.href)?.evaluateScript(script)
+        Task {
+            await withTaskGroup(of: Void.self) { tasks in
+                var decorationsIsGroup = self.decorations[group]
+                decorationsIsGroup?.removeAll(where: {$0.decoration.id == decoration.id})
+                self.decorations[group] = decorationsIsGroup
+                
+                let script = "requestAnimationFrame(function () { readium.getDecorations('\(group)').clearEnhanced('\(decoration.id)'); });"
+                
+                tasks.addTask {
+                    await self.loadedSpreadViewForHREF(decoration.locator.href)?.evaluateScript(script)
+                }
+            }
+        }
     }
     
     public func addDecorations(decorations: [Decoration], enhanced: Bool, in group: String, completion: @escaping () -> Void) {
-        let date = Date()
-        let source = self.decorations[group] ?? []
-        let target = decorations.map { DiffableDecoration(decoration: $0) }
-        
-        self.decorations[group]?.append(contentsOf: target)
-        
-        let decorationChanges = decorations.map {enhanced ? DecorationChange.addEnhanced($0) : DecorationChange.add($0)}
-        
-        if let script = decorationChanges.javascript(forGroup: group, styles: config.decorationTemplates) {
-            self.loadedSpreadView(forHREF: decorations[0].locator.href)?.evaluateScript(script, inHREF: decorations[0].locator.href) { _ in
-                completion()
+        Task {
+            await initialize()
+            
+            await withTaskGroup(of: Void.self) { tasks in
+                let source = self.decorations[group] ?? []
+                let target = decorations.map { DiffableDecoration(decoration: $0) }
+                
+                self.decorations[group]?.append(contentsOf: target)
+                
+                let decorationChanges = decorations.map {enhanced ? DecorationChange.addEnhanced($0) : DecorationChange.add($0)}
+                
+                if let script = decorationChanges.javascript(forGroup: group, styles: config.decorationTemplates) {
+                    tasks.addTask { [weak self] in
+                        await self?.loadedSpreadViewForHREF(decorations[0].locator.href)?.evaluateScript(script, inHREF: decorations[0].locator.href)
+                        completion()
+                    }
+                } else {
+                    completion()
+                }
             }
-        } else {
-            completion()
         }
     }
 
@@ -989,9 +1023,17 @@ open class EPUBNavigatorViewController: UIViewController,
         var callbacks = decorationRectsCallbacks[group] ?? []
         callbacks.append(onActivated)
         decorationRectsCallbacks[group] = callbacks
-
-        for (_, view) in paginationView.loadedViews {
-            (view as? EPUBSpreadView)?.evaluateScript("readium.getDecorations('\(group)').setActivable();")
+        
+        Task {
+            await initialized()
+            
+            await withTaskGroup(of: Void.self) { tasks in
+                for (_, view) in paginationView.loadedViews {
+                    tasks.addTask {
+                        await (view as? EPUBSpreadView)?.evaluateScript("readium.getDecorations('\(group)').setActivable();")
+                    }
+                }
+            }
         }
     }
 
