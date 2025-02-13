@@ -136,11 +136,16 @@ public extension HTTPClient {
                 suggestedFilename = response.filename
             },
             consume: { data, progression in
-                fileHandle.seekToEndOfFile()
-                fileHandle.write(data)
-
-                if let progression = progression {
-                    onProgress(progression)
+                if data.count > getAvailableStorage() {
+                    // we need to stop because disk storage is full
+                    completion(.failure(HTTPError(kind: .other)))
+                } else {
+                    fileHandle.seekToEndOfFile()
+                    fileHandle.write(data)
+                    
+                    if let progression = progression {
+                        onProgress(progression)
+                    }
                 }
             },
             completion: { result in
@@ -171,7 +176,25 @@ public extension HTTPClient {
             }
         )
     }
+    
+    private func getAvailableStorage() -> Int64 {
+        let fileURL = URL(fileURLWithPath:"/")
+        do {
+            let values = try fileURL.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+            if let capacity = values.volumeAvailableCapacityForImportantUsage {
+                return capacity-100*1024*1024 // We add an extra 100 MB for safety
+            } else {
+                print("Capacity is unavailable")
+            }
+        } catch {
+            print("Error retrieving capacity: \(error.localizedDescription)")
+        }
+        
+        return 0
+    }
 }
+
+
 
 /// Represents a successful HTTP response received from a server.
 public struct HTTPResponse: Equatable {

@@ -161,6 +161,10 @@ final class LicensesService: Loggable {
 
                     case let .failure(error):
                         acquisition.didComplete(with: .failure(LCPError.wrap(error)))
+                        
+                        if error.kind == .other {
+                            acquisition.cancellable.cancel()
+                        }
                     }
                 }
             )
