@@ -72,6 +72,7 @@ class _HTMLResourceContentExtractor: _ResourceContentExtractor {
                         .replacingOccurrences(of: "/p><p", with: "/p>\n<p")
                         .replacingOccurrences(of: "&amp;", with: "ampToand")
                         .replacingOccurrences(of: "&#x0026;", with: "ampToand")
+                        .replacingOccurrences(of: "&quot;", with: "rallyquote")
                     )
                     
                     let text = parse(xml: unescapedContent)
@@ -79,7 +80,10 @@ class _HTMLResourceContentExtractor: _ResourceContentExtractor {
                         ?? ""
                     
                     return .success(
-                        text.replacingOccurrences(of: "ampToand", with: "&")
+                        text
+                            .replacingOccurrences(of: "ampToand", with: "&")
+                            .replacingOccurrences(of: "rallyquote", with: "\"")
+                        
                         //.replacingOccurrences(of: "br2n", with: "\n")
                     )
                     
