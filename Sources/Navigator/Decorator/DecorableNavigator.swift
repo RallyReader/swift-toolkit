@@ -71,6 +71,8 @@ public struct OnDecorationRectEvent {
     /// Frame of the bounding rect for the decoration, in the coordinate of the navigator view. This is only useful in
     /// the context of a VisualNavigator.
     public let rect: CGRect?
+    
+    public let ocrLayout: Bool
 }
 
 public extension DecorableNavigator {
@@ -159,6 +161,7 @@ public struct Decoration: Hashable {
             "id": id,
             "locator": locator.json,
             "style": style.id.rawValue,
+            "userInfo": userInfo
         ]
     }
 }

@@ -394,14 +394,63 @@ export function DecorationGroup(groupId, groupName) {
 
     log(`yoffset: ${yOffset}`);
 
+    // const computedStyle = window.getComputedStyle(item.range);
+    // log(`computed style width: ${computedStyle.width}`);
+    // log(`computed style height: ${computedStyle.height}`);
+
+    // 1. Get the DOM node from the range
+    let startNode = item.range.startContainer;
+
+    // 2. If the startNode is a text node, go up to its parent element.
+    if (startNode.nodeType === Node.TEXT_NODE) {
+      startNode = startNode.parentElement;
+    }
+
+    // Use computed style width and height instead of the one returned by boundingRect
+    let computedWidth = undefined;
+    let computedHeight = undefined;
+
+    log(`BEFORE ACCESSING USER INFO`);
+    log(`user info = ${item.decoration.userInfo.useComputedStyle}`);
+
+    // if (
+    //   item.decoration.userInfo !== undefined &&
+    //   item.decoration.userInfo.useComputedStyle == 1
+    // ) {
+    // Climb up the tree until you reach .text-overlay (or whatever class you expect)
+    const textOverlayElement = startNode.closest(".text-overlay");
+    let ocrLayout = false;
+    if (textOverlayElement) {
+      ocrLayout = true;
+      // Now you can call getComputedStyle on that element
+      const computedStyle = window.getComputedStyle(textOverlayElement);
+      log("Computed width:", computedStyle.width);
+      log("Computed height:", computedStyle.height);
+      computedWidth = computedStyle.width;
+      computedHeight = computedStyle.height;
+    } else {
+      log("No .text-overlay parent found for this range.");
+    }
+    // }
+
     // Position the decoration element inside the page container
     function positionElement(element, rect, boundingRect) {
       element.style.position = "absolute";
       log(`style width: ${style.width}`);
+      log(`element style width: ${element.style.width}`);
+      log(`rect width: ${rect.width}`);
       log(`rect left: ${rect.left}`);
+      log(`applying computed width: ${computedWidth}`);
+
       if (style.width === "wrap") {
-        element.style.width = `${rect.width}px`;
-        element.style.height = `${rect.height}px`;
+        if (computedWidth !== undefined && computedHeight !== undefined) {
+          element.style.width = `${computedWidth}`;
+          element.style.height = `${computedHeight}`;
+        } else {
+          element.style.width = `${rect.width}px`;
+          element.style.height = `${rect.height}px`;
+        }
+
         element.style.left = `${rect.left + xOffset}px`; // Position within the page
         element.style.top = `${rect.top + yOffset}px`;
       } else if (style.width === "viewport") {
@@ -476,6 +525,7 @@ export function DecorationGroup(groupId, groupName) {
         id: item.decoration.id,
         group: groupName,
         rect: toNativeRect(boundingRect),
+        ocrLayout: ocrLayout,
       });
     }
   }

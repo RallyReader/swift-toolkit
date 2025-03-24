@@ -25,7 +25,7 @@ protocol EPUBSpreadViewDelegate: AnyObject {
     func spreadView(_ spreadView: EPUBSpreadView, didActivateDecoration id: Decoration.Id, inGroup group: String, frame: CGRect?, point: CGPoint?)
     
     /// Called when a decoration rect is calculated
-    func spreadView(_ spreadView: EPUBSpreadView, didCalculateDecorationRect id: Decoration.Id, inGroup group: String, frame: CGRect?)
+    func spreadView(_ spreadView: EPUBSpreadView, didCalculateDecorationRect id: Decoration.Id, inGroup group: String, frame: CGRect?, ocrLayout: Bool)
 
     /// Called when the text selection changes.
     func spreadView(_ spreadView: EPUBSpreadView, selectionDidChange text: Locator.Text?, frame: CGRect)
@@ -454,7 +454,8 @@ class EPUBSpreadView: UIView, Loggable, PageView {
         }
 
         frame = convertRectToNavigatorSpace(frame)
-        delegate?.spreadView(self, didCalculateDecorationRect: decorationId, inGroup: groupName, frame: frame)
+        let ocrLayout = decoration["ocrLayout"] as? Bool ?? false
+        delegate?.spreadView(self, didCalculateDecorationRect: decorationId, inGroup: groupName, frame: frame, ocrLayout: ocrLayout)
     }
 
     // MARK: - Accessibility

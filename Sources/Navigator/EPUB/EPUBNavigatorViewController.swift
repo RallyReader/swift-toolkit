@@ -894,6 +894,8 @@ open class EPUBNavigatorViewController: UIViewController,
         }
     }
     
+//    public func documentHasOCRContainer(href: String) 
+    
     public func currentSpreadDisplayingLastPage() -> Bool {
         
         if let spreadView = paginationView.loadedViews[paginationView.currentIndex] as? EPUBSpreadView {
@@ -960,11 +962,20 @@ open class EPUBNavigatorViewController: UIViewController,
             }
 
         } else {
-            for (href, changes) in target.changesByHREF(from: source) {
+            if decorations.isEmpty == false {
+                print("wefwf")
+            }
+            for (href, changes) in target.changesByHREF(from: source, enhanced: enhanced) {
                 guard let script = changes.javascript(forGroup: group, styles: config.decorationTemplates) else {
                     continue
                 }
-                loadedSpreadView(forHREF: href)?.evaluateScript(script, inHREF: href)
+                print("decorations script: \(script)")
+                let loadedSpread = loadedSpreadView(forHREF: href)
+                if let loadedSpread = loadedSpread {
+                    loadedSpread.evaluateScript(script, inHREF: href)
+                } else {
+                    print("spread not loaded: \(href)")
+                }
             }
         }
     }
@@ -985,9 +996,12 @@ open class EPUBNavigatorViewController: UIViewController,
         
         self.decorations[group]?.append(contentsOf: target)
         
+//        print("ADD DECORATIONS ENHANCED: \(decorations.count)")
+        
         let decorationChanges = decorations.map {enhanced ? DecorationChange.addEnhanced($0) : DecorationChange.add($0)}
         
         if let script = decorationChanges.javascript(forGroup: group, styles: config.decorationTemplates) {
+//            print("ADD DECORATIONS script: \(script)")
             self.loadedSpreadView(forHREF: decorations[0].locator.href)?.evaluateScript(script, inHREF: decorations[0].locator.href) { _ in
                 completion()
             }
@@ -1159,7 +1173,7 @@ extension EPUBNavigatorViewController: EPUBSpreadViewDelegate {
                 for (group, decorations) in self.decorations {
                     let decorations = decorations
                         .filter { $0.decoration.locator.href == href }
-                        .map { DecorationChange.add($0.decoration) }
+                        .map { ($0.decoration.userInfo["ocrLayout"] as? Bool) == true ? DecorationChange.addEnhanced($0.decoration) : DecorationChange.add($0.decoration) }
 
                     guard let script = decorations.javascript(forGroup: group, styles: self.config.decorationTemplates) else {
                         continue
@@ -1299,7 +1313,7 @@ extension EPUBNavigatorViewController: EPUBSpreadViewDelegate {
         }
     }
     
-    func spreadView(_ spreadView: EPUBSpreadView, didCalculateDecorationRect id: Decoration.Id, inGroup group: String, frame: CGRect?) {
+    func spreadView(_ spreadView: EPUBSpreadView, didCalculateDecorationRect id: Decoration.Id, inGroup group: String, frame: CGRect?, ocrLayout: Bool) {
         guard
             let callbacks = decorationRectsCallbacks[group].takeIf({ !$0.isEmpty })
         else {
@@ -1307,7 +1321,7 @@ extension EPUBNavigatorViewController: EPUBSpreadViewDelegate {
         }
 
         for callback in callbacks {
-            callback(OnDecorationRectEvent(decorationId: id, group: group, rect: frame))
+            callback(OnDecorationRectEvent(decorationId: id, group: group, rect: frame, ocrLayout: ocrLayout))
         }
     }
 

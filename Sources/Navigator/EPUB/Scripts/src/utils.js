@@ -886,6 +886,10 @@ export function getLastVisibleWordText() {
   return null; // Return null if no visible word is found
 }
 
+export function hasOCRContainer() {
+  // This selects the first div element with class "ocr-container"
+  return document.querySelector("div.ocr-container") !== null;
+}
 /// User Settings.
 
 export function setCSSProperties(properties) {

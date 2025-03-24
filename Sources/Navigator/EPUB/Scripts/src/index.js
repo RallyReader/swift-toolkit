@@ -23,6 +23,7 @@ import {
   calculateHorizontalPageRanges,
   getFirstVisibleWordText,
   getLastVisibleWordText,
+  hasOCRContainer,
 } from "./utils";
 import { getDecorations, registerTemplates } from "./decorator";
 
@@ -42,6 +43,7 @@ global.readium = {
   calculateHorizontalPageRanges: calculateHorizontalPageRanges,
   getFirstVisibleWordText: getFirstVisibleWordText,
   getLastVisibleWordText: getLastVisibleWordText,
+  hasOCRContainer: hasOCRContainer,
   // decoration
   registerDecorationTemplates: registerTemplates,
   getDecorations: getDecorations,

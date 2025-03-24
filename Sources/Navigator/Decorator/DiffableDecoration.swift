@@ -21,7 +21,7 @@ enum DecorationChange {
 }
 
 extension Array where Element == DiffableDecoration {
-    func changesByHREF(from source: [DiffableDecoration]) -> [String: [DecorationChange]] {
+    func changesByHREF(from source: [DiffableDecoration], enhanced: Bool) -> [String: [DecorationChange]] {
         let changeset = StagedChangeset(source: source, target: self)
 
         var changes: [String: [DecorationChange]] = [:]
@@ -39,7 +39,7 @@ extension Array where Element == DiffableDecoration {
             }
             for inserted in change.elementInserted {
                 let decoration = self[inserted.element].decoration
-                register(.add(decoration), at: decoration.locator)
+                register(enhanced ? .addEnhanced(decoration) : .add(decoration), at: decoration.locator)
             }
             for updated in change.elementUpdated {
                 let decoration = self[updated.element].decoration
