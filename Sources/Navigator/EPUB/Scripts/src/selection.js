@@ -130,19 +130,10 @@ export function getTextFrom(highlight, range) {
   function processElement(element) {
     if (element.nodeType === Node.TEXT_NODE) {
       fullText += element.textContent;
-    } else if (element.nodeName === "br") {
-      fullText += "\n";
     }
   }
 
   function processNode(node) {
-    if (node.nodeName === "p") {
-      if (!/\s$/.test(fullText)) {
-        log(`appending new line before paragraph`);
-        fullText += "\n";
-      }
-    }
-
     if (node.childNodes.length > 0) {
       let child = node.firstChild;
       while (child) {

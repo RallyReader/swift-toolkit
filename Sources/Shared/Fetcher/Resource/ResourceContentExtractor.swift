@@ -67,9 +67,10 @@ class _HTMLResourceContentExtractor: _ResourceContentExtractor {
                     
                     // Transform HTML entities into their actual characters.
                     let unescapedContent = try Entities.unescape(content
-                        .replacingOccurrences(of: "<br />", with: "br2n")
-                        .replacingOccurrences(of: "<br/>", with: "br2n")
+                        .replacingOccurrences(of: "<br />", with: "<br /\n>")
+                        .replacingOccurrences(of: "<br/>", with: "<br/>\n")
                         .replacingOccurrences(of: "/p><p", with: "/p>\n<p")
+                        .replacingOccurrences(of: "/div><div", with: "/div>\n<div")
                         .replacingOccurrences(of: "&amp;", with: "ampToand")
                         .replacingOccurrences(of: "&#x0026;", with: "ampToand")
                         .replacingOccurrences(of: "&quot;", with: "rallyquote")

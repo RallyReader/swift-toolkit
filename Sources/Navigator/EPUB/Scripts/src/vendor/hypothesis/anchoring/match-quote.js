@@ -1,5 +1,5 @@
 import approxSearch from 'approx-string-match';
-
+import { log } from "../../../utils";
 /**
  * @typedef {import('approx-string-match').Match} StringMatch
  */
@@ -28,6 +28,8 @@ function search(text, str, maxErrors, approximateStart = null, approximateEnd = 
     searchText = text.slice(approximateStart, approximateEnd);
   }
   
+  // log(`searching for <${str}> in <${searchText}>`);
+
   // Perform fast search for exact matches in the search area
   let matchPos = 0;
   let exactMatches = [];
