@@ -74,6 +74,7 @@ class _HTMLResourceContentExtractor: _ResourceContentExtractor {
                         .replacingOccurrences(of: "&amp;", with: "ampToand")
                         .replacingOccurrences(of: "&#x0026;", with: "ampToand")
                         .replacingOccurrences(of: "&quot;", with: "rallyquote")
+                        .replacingOccurrences(of: "\u{FB00}", with: "ff")
                     )
                     
                     let text = parse(xml: unescapedContent)

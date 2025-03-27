@@ -81,11 +81,14 @@ export function registerTemplates(newStyles) {
     "<br />\n"
   );
 
-  log(
-    `DID REGISTER TEMPLATES for ${
-      document.location.href || document.title || "document"
-    }`
-  );
+  // Replace Unicode ligature 'ff' (U+FB00) with regular 'ff'
+  document.body.innerHTML = document.body.innerHTML.replace(/\ufb00/g, "ff");
+
+  // log(
+  //   `DID REGISTER TEMPLATES for ${
+  //     document.location.href || document.title || "document"
+  //   }`
+  // );
 }
 
 /**
