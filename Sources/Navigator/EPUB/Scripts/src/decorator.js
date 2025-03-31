@@ -84,11 +84,139 @@ export function registerTemplates(newStyles) {
   // Replace Unicode ligature 'ff' (U+FB00) with regular 'ff'
   document.body.innerHTML = document.body.innerHTML.replace(/\ufb00/g, "ff");
 
+  log(`Document body html content: ${document.body.innerHTML}`);
+  // Process span elements to ensure proper text spacing
+  log(`Document body text content BEFORE: ${document.body.textContent}`);
+  processSpansForTextSpacing();
+  log(`Document body text content AFTER: ${document.body.textContent}`);
+
   // log(
   //   `DID REGISTER TEMPLATES for ${
   //     document.location.href || document.title || "document"
   //   }`
   // );
+}
+
+/**
+ * Processes spans in the document to ensure proper spacing between text segments.
+ * This prevents words from being incorrectly stitched together when extracting text.
+ */
+function processSpansForTextSpacing() {
+  // Get all spans in the document
+  const spans = document.querySelectorAll("span");
+
+  // Group spans by parent element to analyze siblings
+  const spansByParent = {};
+  for (const span of spans) {
+    const parentKey = span.parentElement
+      ? span.parentElement.tagName +
+        "_" +
+        (span.parentElement.id || Math.random())
+      : "orphan";
+    if (!spansByParent[parentKey]) {
+      spansByParent[parentKey] = [];
+    }
+    spansByParent[parentKey].push(span);
+  }
+
+  // Process each group of sibling spans
+  for (const parentKey in spansByParent) {
+    const siblingSpans = spansByParent[parentKey].slice();
+
+    // Sort spans by their vertical position (bottom value)
+    siblingSpans.sort((a, b) => {
+      const aBottom = parseFloat(a.style.bottom || "0");
+      const bBottom = parseFloat(b.style.bottom || "0");
+      return bBottom - aBottom; // Sort from top to bottom (larger bottom value is higher)
+    });
+
+    // Analyze bottom distances between adjacent siblings
+    for (let i = 1; i < siblingSpans.length; i++) {
+      const currentSpan = siblingSpans[i];
+      const previousSpan = siblingSpans[i - 1];
+
+      const currentBottom = parseFloat(currentSpan.style.bottom || "0");
+      const previousBottom = parseFloat(previousSpan.style.bottom || "0");
+
+      // Calculate vertical distance between spans
+      const bottomDifference = Math.abs(previousBottom - currentBottom);
+
+      log(
+        `Sibling spans: "${previousSpan.textContent}" -> "${currentSpan.textContent}" | Bottom difference: ${bottomDifference}`
+      );
+
+      // If there's a significant vertical gap, mark for spacing
+      if (bottomDifference > 30) {
+        previousSpan.setAttribute("data-needs-spacing", "true");
+        log(
+          `Marked for spacing: "${previousSpan.textContent}" (bottom diff: ${bottomDifference})`
+        );
+      }
+    }
+  }
+
+  // First pass: Add data attribute to mark spans with significant positioning
+  let previousLeft = null;
+  let previousBottom = null;
+  let previousParent = null;
+
+  for (let i = 0; i < spans.length; i++) {
+    const span = spans[i];
+    // const style = getComputedStyle(span);
+
+    // Extract positioning information
+    const left = parseFloat(span.style.left || "0");
+    const bottom = parseFloat(span.style.bottom || "0");
+    const parent = span.parentElement;
+
+    log(`span: ${span.textContent} | bottom: ${bottom}`);
+
+    // Check if this span is positioned significantly away from the previous one
+    if (previousLeft !== null && previousParent === parent) {
+      // If there's a significant horizontal or vertical gap, mark for spacing
+      if (
+        // Math.abs(left - previousLeft) > 100 ||
+        Math.abs(bottom - previousBottom) > 30
+      ) {
+        span.setAttribute("data-needs-spacing", "true");
+      }
+    }
+
+    previousLeft = left;
+    previousBottom = bottom;
+    previousParent = parent;
+  }
+
+  // Second pass: Insert spaces where needed
+  for (const span of document.querySelectorAll(
+    'span[data-needs-spacing="true"]'
+  )) {
+    // Insert a zero-width space followed by a real space at the beginning of the span
+    // This ensures text extraction will include a space but doesn't affect visual rendering
+    const textNode = span.firstChild;
+    if (textNode && textNode.nodeType === Node.TEXT_NODE) {
+      textNode.textContent = " " + textNode.textContent;
+    } else {
+      span.insertBefore(document.createTextNode(" "), span.firstChild);
+    }
+
+    // Remove the marker attribute
+    span.removeAttribute("data-needs-spacing");
+  }
+
+  // Handle spans that contain word-spacing style (these already have explicit spacing)
+  const wordSpacedSpans = document.querySelectorAll(
+    'span[style*="word-spacing"]'
+  );
+  for (const span of wordSpacedSpans) {
+    // Ensure the browser's implicit spacing is preserved in extracted text
+    if (span.textContent.trim() && !span.textContent.includes(" ")) {
+      span.innerHTML = span.innerHTML.replace(
+        /(<[^>]+>)([^\s<]+)(<[^>]+>|$)/g,
+        "$1$2 $3"
+      );
+    }
+  }
 }
 
 /**

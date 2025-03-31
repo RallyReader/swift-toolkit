@@ -24,6 +24,7 @@ import {
   getFirstVisibleWordText,
   getLastVisibleWordText,
   hasOCRContainer,
+  getHtmlBodyTextContent,
 } from "./utils";
 import { getDecorations, registerTemplates } from "./decorator";
 
@@ -44,6 +45,7 @@ global.readium = {
   getFirstVisibleWordText: getFirstVisibleWordText,
   getLastVisibleWordText: getLastVisibleWordText,
   hasOCRContainer: hasOCRContainer,
+  getHtmlBodyTextContent: getHtmlBodyTextContent,
   // decoration
   registerDecorationTemplates: registerTemplates,
   getDecorations: getDecorations,

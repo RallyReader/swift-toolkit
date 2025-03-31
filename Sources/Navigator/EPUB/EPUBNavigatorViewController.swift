@@ -894,6 +894,23 @@ open class EPUBNavigatorViewController: UIViewController,
         }
     }
     
+    public func getHtmlBodyTextContent(href: String, completion: @escaping (String?) -> Void) {
+        if let spreadView = loadedSpreadView(forHREF: href) {
+            let script = "readium.getHtmlBodyTextContent()"
+            spreadView.evaluateScript(script, inHREF: href, completion: { result in
+                do {
+                    let readiumResult = try result.get()
+                    completion(readiumResult as? String)
+                } catch {
+                    self.log(.error, error)
+                    completion(nil)
+                }
+            })
+        } else {
+            completion(nil)
+        }
+    }
+    
 //    public func documentHasOCRContainer(href: String) 
     
     public func currentSpreadDisplayingLastPage() -> Bool {

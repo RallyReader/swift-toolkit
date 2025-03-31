@@ -890,8 +890,12 @@ export function hasOCRContainer() {
   // This selects the first div element with class "ocr-container"
   return document.querySelector("div.ocr-container") !== null;
 }
-/// User Settings.
 
+export function getHtmlBodyTextContent() {
+  return document.body.textContent;
+}
+
+/// User Settings.
 export function setCSSProperties(properties) {
   for (const name in properties) {
     setProperty(name, properties[name]);
