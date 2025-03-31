@@ -388,9 +388,40 @@ export function DecorationGroup(groupId, groupName) {
 
     // Calculate which page (container) this decoration belongs to based on its left position
     let viewportWidth = window.innerWidth;
-    let pageIndex = Math.floor(
-      (boundingRect.left + window.scrollX) / viewportWidth
-    ); // Calculate the page index
+    let pageIndex = 0;
+
+    function postMessageWithInvalidRect() {
+      logErrorMessage(`fallback to invalid rect`);
+      if (postMessage) {
+        webkit.messageHandlers.decorationRect.postMessage({
+          id: item.decoration.id,
+          group: groupName,
+          rect: { left: 0, top: 0, width: 0, height: 0 },
+          ocrLayout: false,
+        });
+      }
+    }
+
+    try {
+      log(
+        `bounding rect: {left: ${boundingRect.left}, top: ${boundingRect.top}, width: ${boundingRect.width}, height: ${boundingRect.height} for: ${item.range}}`
+      );
+      if (
+        boundingRect.left + boundingRect.width < 0 ||
+        boundingRect.top + boundingRect.height < 0
+      ) {
+        postMessageWithInvalidRect();
+        return;
+      }
+
+      pageIndex = Math.floor(
+        (boundingRect.left + window.scrollX) / viewportWidth
+      ); // Calculate the page index
+    } catch (error) {
+      logErrorMessage(`Error calculating page index: ${error.message}`);
+      postMessageWithInvalidRect();
+      return;
+    }
 
     let visibleAreaResponse = applyContainmentToArea(pageIndex); // Get or create the container for this page
     let visibleArea = visibleAreaResponse.visibleArea;
@@ -513,36 +544,48 @@ export function DecorationGroup(groupId, groupName) {
     }
 
     log(`style layout: ${style.layout}`);
+    try {
+      if (style.layout === "boxes") {
+        let doNotMergeHorizontallyAlignedRects = true;
+        let clientRects = getClientRectsNoOverlap(
+          item.range,
+          doNotMergeHorizontallyAlignedRects
+        );
 
-    if (style.layout === "boxes") {
-      let doNotMergeHorizontallyAlignedRects = true;
-      let clientRects = getClientRectsNoOverlap(
-        item.range,
-        doNotMergeHorizontallyAlignedRects
-      );
+        clientRects = clientRects.sort((r1, r2) => {
+          if (r1.top < r2.top) {
+            return -1;
+          } else if (r1.top > r2.top) {
+            return 1;
+          } else {
+            return 0;
+          }
+        });
 
-      clientRects = clientRects.sort((r1, r2) => {
-        if (r1.top < r2.top) {
-          return -1;
-        } else if (r1.top > r2.top) {
-          return 1;
-        } else {
-          return 0;
+        for (let clientRect of clientRects) {
+          const line = elementTemplate.cloneNode(true);
+          line.style.setProperty("pointer-events", "none");
+          positionElement(line, clientRect, boundingRect);
+          itemContainer.append(line);
         }
-      });
+      } else if (style.layout === "bounds") {
+        const bounds = elementTemplate.cloneNode(true);
+        bounds.style.setProperty("pointer-events", "none");
+        positionElement(bounds, boundingRect, boundingRect);
 
-      for (let clientRect of clientRects) {
-        const line = elementTemplate.cloneNode(true);
-        line.style.setProperty("pointer-events", "none");
-        positionElement(line, clientRect, boundingRect);
-        itemContainer.append(line);
+        itemContainer.append(bounds);
       }
-    } else if (style.layout === "bounds") {
-      const bounds = elementTemplate.cloneNode(true);
-      bounds.style.setProperty("pointer-events", "none");
-      positionElement(bounds, boundingRect, boundingRect);
-
-      itemContainer.append(bounds);
+    } catch (error) {
+      logErrorMessage(`Error calculating position: ${error.message}`);
+      if (postMessage) {
+        webkit.messageHandlers.decorationRect.postMessage({
+          id: item.decoration.id,
+          group: groupName,
+          rect: null,
+          ocrLayout: false,
+        });
+      }
+      return;
     }
 
     // Add the decoration to the corresponding visible area container (page)
