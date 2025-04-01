@@ -119,7 +119,7 @@ function processSpansForTextSpacing() {
     spansByParent[parentKey].push(span);
   }
 
-  // Process each group of sibling spans
+  // First pass: Process spans and mark those that need spacing
   for (const parentKey in spansByParent) {
     const siblingSpans = spansByParent[parentKey].slice();
 
@@ -141,55 +141,18 @@ function processSpansForTextSpacing() {
       // Calculate vertical distance between spans
       const bottomDifference = Math.abs(previousBottom - currentBottom);
 
-      // log(
-      //   `Sibling spans: "${previousSpan.textContent}" -> "${currentSpan.textContent}" | Bottom difference: ${bottomDifference}`
-      // );
-
       // If there's a significant vertical gap, mark for spacing
       if (bottomDifference > 30) {
         previousSpan.setAttribute("data-needs-spacing", "true");
-        // log(
-        //   `Marked for spacing: "${previousSpan.textContent}" (bottom diff: ${bottomDifference})`
-        // );
       }
     }
-  }
-
-  // First pass: Add data attribute to mark spans with significant positioning
-  let previousLeft = null;
-  let previousBottom = null;
-  let previousParent = null;
-
-  for (let i = 0; i < spans.length; i++) {
-    const span = spans[i];
-    // const style = getComputedStyle(span);
-
-    // Extract positioning information
-    const left = parseFloat(span.style.left || "0");
-    const bottom = parseFloat(span.style.bottom || "0");
-    const parent = span.parentElement;
-
-    log(`span: ${span.textContent} | bottom: ${bottom}`);
-
-    // Check if this span is positioned significantly away from the previous one
-    if (previousLeft !== null && previousParent === parent) {
-      // If there's a significant vertical gap, mark for spacing
-      if (Math.abs(bottom - previousBottom) > 30) {
-        span.setAttribute("data-needs-spacing", "true");
-      }
-    }
-
-    previousLeft = left;
-    previousBottom = bottom;
-    previousParent = parent;
   }
 
   // Second pass: Insert spaces where needed
   for (const span of document.querySelectorAll(
     'span[data-needs-spacing="true"]'
   )) {
-    // Insert a zero-width space followed by a real space at the beginning of the span
-    // This ensures text extraction will include a space but doesn't affect visual rendering
+    // Insert a space at the beginning of the span
     const textNode = span.firstChild;
     if (textNode && textNode.nodeType === Node.TEXT_NODE) {
       textNode.textContent = " " + textNode.textContent;
