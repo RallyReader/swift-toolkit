@@ -15,6 +15,8 @@ public protocol EPUBNavigatorDelegate: VisualNavigatorDelegate, SelectableNaviga
 
     func navigator(_ navigator: EPUBNavigatorViewController, setupUserScripts userContentController: WKUserContentController)
 
+    func spreadViewDidLoad(href: String)
+    
     // MARK: - Deprecated
 
     // Implement `NavigatorDelegate.navigator(didTapAt:)` instead.
@@ -1197,8 +1199,15 @@ extension EPUBNavigatorViewController: EPUBSpreadViewDelegate {
                     }
                     spreadView.evaluateScript(script, inHREF: href)
                 }
+                self.delegate?.spreadViewDidLoad(href: href)
             }
         }
+        
+        
+        
+//        if let href = spreadView.focusedResource?.href {
+//            self.delegate?.spreadViewDidLoad(href: href)
+//        }
     }
 
     func spreadView(_ spreadView: EPUBSpreadView, didTapAt point: CGPoint) {

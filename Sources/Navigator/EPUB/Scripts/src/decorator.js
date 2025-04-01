@@ -61,34 +61,34 @@ export function registerTemplates(newStyles) {
   `;
   document.head.appendChild(imgStyle);
 
+  // log(`Document body html content: ${document.body.innerHTML}`);
+
+  // Add newlines before <div> and <p> tags to preserve line breaks if a new line is not present
   document.body.innerHTML = document.body.innerHTML.replace(
-    /\/div><div/g,
-    "/div>\n<div"
-  );
-  document.body.innerHTML = document.body.innerHTML.replace(
-    /\/p><p/g,
-    "/p>\n<p"
+    /([^\n])<(div|p)/g,
+    "$1\n<$2"
   );
 
-  // Replace <br/> and <br /> with the same tags plus a newline character
-  // This preserves the line break in rendering while adding a newline for better text extraction
+  // Add newlines after </div> and </p> tags, but only if a newline doesn't already exist
   document.body.innerHTML = document.body.innerHTML.replace(
-    /<br\/>/g,
-    "<br/>\n"
+    /<\/(div|p)>([^\n])/g,
+    "</$1>\n$2"
   );
+
+  // Replace all br tag variants with the same tags plus a newline character
+  // This handles both <br/> and <br /> formats in a single operation
   document.body.innerHTML = document.body.innerHTML.replace(
-    /<br \/>/g,
-    "<br />\n"
+    /<br\s*\/>/g,
+    "$&\n"
   );
 
   // Replace Unicode ligature 'ff' (U+FB00) with regular 'ff'
   document.body.innerHTML = document.body.innerHTML.replace(/\ufb00/g, "ff");
 
-  log(`Document body html content: ${document.body.innerHTML}`);
   // Process span elements to ensure proper text spacing
-  log(`Document body text content BEFORE: ${document.body.textContent}`);
+  // log(`Document body text content BEFORE: ${document.body.textContent}`);
   processSpansForTextSpacing();
-  log(`Document body text content AFTER: ${document.body.textContent}`);
+  // log(`Document body text content AFTER: ${document.body.textContent}`);
 
   // log(
   //   `DID REGISTER TEMPLATES for ${
@@ -141,16 +141,16 @@ function processSpansForTextSpacing() {
       // Calculate vertical distance between spans
       const bottomDifference = Math.abs(previousBottom - currentBottom);
 
-      log(
-        `Sibling spans: "${previousSpan.textContent}" -> "${currentSpan.textContent}" | Bottom difference: ${bottomDifference}`
-      );
+      // log(
+      //   `Sibling spans: "${previousSpan.textContent}" -> "${currentSpan.textContent}" | Bottom difference: ${bottomDifference}`
+      // );
 
       // If there's a significant vertical gap, mark for spacing
       if (bottomDifference > 30) {
         previousSpan.setAttribute("data-needs-spacing", "true");
-        log(
-          `Marked for spacing: "${previousSpan.textContent}" (bottom diff: ${bottomDifference})`
-        );
+        // log(
+        //   `Marked for spacing: "${previousSpan.textContent}" (bottom diff: ${bottomDifference})`
+        // );
       }
     }
   }
@@ -173,11 +173,8 @@ function processSpansForTextSpacing() {
 
     // Check if this span is positioned significantly away from the previous one
     if (previousLeft !== null && previousParent === parent) {
-      // If there's a significant horizontal or vertical gap, mark for spacing
-      if (
-        // Math.abs(left - previousLeft) > 100 ||
-        Math.abs(bottom - previousBottom) > 30
-      ) {
+      // If there's a significant vertical gap, mark for spacing
+      if (Math.abs(bottom - previousBottom) > 30) {
         span.setAttribute("data-needs-spacing", "true");
       }
     }
