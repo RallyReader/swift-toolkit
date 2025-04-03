@@ -1189,14 +1189,18 @@ extension EPUBNavigatorViewController: EPUBSpreadViewDelegate {
         spreadView.evaluateScript("(function() {\n\(script)\n})();") { _ in
             for link in spreadView.spread.links {
                 let href = link.href
+                print("DECORATIONS :: spread loaded: \(href)")
                 for (group, decorations) in self.decorations {
                     let decorations = decorations
                         .filter { $0.decoration.locator.href == href }
-                        .map { ($0.decoration.userInfo["ocrLayout"] as? Bool) == true ? DecorationChange.addEnhanced($0.decoration) : DecorationChange.add($0.decoration) }
+                        .map { ($0.decoration.userInfo["enhancedLayout"] as? Bool) == true ? DecorationChange.addEnhanced($0.decoration) : DecorationChange.add($0.decoration) }
 
                     guard let script = decorations.javascript(forGroup: group, styles: self.config.decorationTemplates) else {
                         continue
                     }
+                    
+                    print("DECORATIONS :: evaluate script: \(script)")
+                    
                     spreadView.evaluateScript(script, inHREF: href)
                 }
                 self.delegate?.spreadViewDidLoad(href: href)
