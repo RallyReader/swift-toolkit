@@ -119,20 +119,6 @@ function processSpansForTextSpacing() {
     // Remove the marker attribute
     span.removeAttribute("data-needs-spacing");
   }
-
-  // Handle spans that contain word-spacing style (these already have explicit spacing)
-  // const wordSpacedSpans = document.querySelectorAll(
-  //   'span[style*="word-spacing"]'
-  // );
-  // for (const span of wordSpacedSpans) {
-  //   // Ensure the browser's implicit spacing is preserved in extracted text
-  //   if (span.textContent.trim() && !span.textContent.includes(" ")) {
-  //     span.innerHTML = span.innerHTML.replace(
-  //       /(<[^>]+>)([^\s<]+)(<[^>]+>|$)/g,
-  //       "$1$2 $3"
-  //     );
-  //   }
-  // }
 }
 
 /**
