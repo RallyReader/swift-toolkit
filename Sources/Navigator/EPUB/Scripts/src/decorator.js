@@ -53,6 +53,14 @@ export function registerTemplates(newStyles) {
   `;
   document.head.appendChild(containStyle);
 
+  // let containerStyle = document.createElement("style");
+  // containerStyle.innerHTML = `
+  //   .my-general-container {
+  //   background-color: rgba(255, 0, 0, 0.3);
+  //   }
+  // `;
+  // document.head.appendChild(containerStyle);
+
   let imgStyle = document.createElement("style");
   imgStyle.innerHTML = `
     img {
@@ -61,34 +69,12 @@ export function registerTemplates(newStyles) {
   `;
   document.head.appendChild(imgStyle);
 
-  // log(`Document body html content: ${document.body.innerHTML}`);
-
-  // Add newlines before <div> and <p> tags to preserve line breaks if a new line is not present
-  document.body.innerHTML = document.body.innerHTML.replace(
-    /([^\n])<(div|p)/g,
-    "$1\n<$2"
-  );
-
-  // Add newlines after </div> and </p> tags, but only if a newline doesn't already exist
-  document.body.innerHTML = document.body.innerHTML.replace(
-    /<\/(div|p)>([^\n])/g,
-    "</$1>\n$2"
-  );
-
-  // Replace all br tag variants with the same tags plus a newline character
-  // This handles both <br/> and <br /> formats in a single operation
-  document.body.innerHTML = document.body.innerHTML.replace(
-    /<br\s*\/>/g,
-    "$&\n"
-  );
-
-  // Replace Unicode ligature 'ff' (U+FB00) with regular 'ff'
-  document.body.innerHTML = document.body.innerHTML.replace(/\ufb00/g, "ff");
+  log(`Document body html content: ${document.body.innerHTML}`);
 
   // Process span elements to ensure proper text spacing
-  // log(`Document body text content BEFORE: ${document.body.textContent}`);
+  log(`Document body text content BEFORE: ${document.body.textContent}`);
   processSpansForTextSpacing();
-  // log(`Document body text content AFTER: ${document.body.textContent}`);
+  log(`Document body text content AFTER: ${document.body.textContent}`);
 
   // log(
   //   `DID REGISTER TEMPLATES for ${
@@ -102,33 +88,62 @@ export function registerTemplates(newStyles) {
  * This prevents words from being incorrectly stitched together when extracting text.
  */
 function processSpansForTextSpacing() {
+  // Replace Unicode ligature 'ff' (U+FB00) with regular 'ff'
+  document.body.innerHTML = document.body.innerHTML.replace(/\ufb00/g, "ff");
+  document.body.innerHTML = document.body.innerHTML.replace(
+    /<br\s*\/>/g,
+    "$&\n"
+  );
+  document.body.innerHTML = document.body.innerHTML.replace(
+    /([^\n])<(div|p)/g,
+    "$1\n<$2"
+  );
+
   // Get all spans in the document
-  const spans = document.querySelectorAll("span");
+  const nodes = document.querySelectorAll("span");
 
   // Group spans by parent element to analyze siblings
-  const spansByParent = {};
-  for (const span of spans) {
-    const parentKey = span.parentElement
-      ? span.parentElement.tagName +
+  const nodesByParent = {};
+  for (const node of nodes) {
+    // if (node.nodeName === "div") {
+    //   if (node.style.bottom === undefined) {
+    //     node.parentElement.insertBefore(document.createTextNode("\n"), node);
+    //     continue;
+    //   }
+    // }
+    const parentKey = node.parentElement
+      ? node.parentElement.tagName +
         "_" +
-        (span.parentElement.id || Math.random())
+        (node.parentElement.id || Math.random())
       : "orphan";
-    if (!spansByParent[parentKey]) {
-      spansByParent[parentKey] = [];
+    if (!nodesByParent[parentKey]) {
+      nodesByParent[parentKey] = [];
     }
-    spansByParent[parentKey].push(span);
+    nodesByParent[parentKey].push(node);
+    // log(`add node: ${node.textContent} to parent: ${parentKey}`);
   }
 
   // First pass: Process spans and mark those that need spacing
-  for (const parentKey in spansByParent) {
-    const siblingSpans = spansByParent[parentKey].slice();
+  for (const parentKey in nodesByParent) {
+    const siblingSpans = nodesByParent[parentKey].slice();
 
-    // Sort spans by their vertical position (bottom value)
-    siblingSpans.sort((a, b) => {
-      const aBottom = parseFloat(a.style.bottom || "0");
-      const bBottom = parseFloat(b.style.bottom || "0");
-      return bBottom - aBottom; // Sort from top to bottom (larger bottom value is higher)
-    });
+    // // Sort spans by their vertical position (bottom value)
+    // siblingSpans.sort((a, b) => {
+    //   const aBottom = parseFloat(a.style.bottom || "0");
+    //   const bBottom = parseFloat(b.style.bottom || "0");
+    //   return bBottom - aBottom; // Sort from top to bottom (larger bottom value is higher)
+    // });
+
+    // if (siblingSpans.length === 1) {
+    //   const span = siblingSpans[0];
+    //   if (span.nodeName === "div") {
+    //     span.parentElement.insertBefore(document.createTextNode("\n"), span);
+    //   } else {
+    //     // if (span.style.hasAttribute("word-spacing")) {
+    //     //   span.parentElement.insertBefore(document.createTextNode(" "), span);
+    //     // }
+    //   }
+    // }
 
     // Analyze bottom distances between adjacent siblings
     for (let i = 1; i < siblingSpans.length; i++) {
@@ -137,45 +152,52 @@ function processSpansForTextSpacing() {
 
       const currentBottom = parseFloat(currentSpan.style.bottom || "0");
       const previousBottom = parseFloat(previousSpan.style.bottom || "0");
+      const currentLeft = parseFloat(currentSpan.style.left || "0");
+      const previousLeft = parseFloat(previousSpan.style.left || "0");
 
       // Calculate vertical distance between spans
-      const bottomDifference = Math.abs(previousBottom - currentBottom);
+      const bottomDifference =
+        previousBottom < currentBottom
+          ? previousBottom / currentBottom
+          : currentBottom / previousBottom;
+
+      const leftDifference =
+        previousLeft < currentLeft
+          ? previousLeft / currentLeft
+          : currentLeft / previousLeft;
+
+      //   log(
+      //     `previous span: ${previousSpan.textContent} | current span: ${currentSpan.textContent} | bottom difference: ${bottomDifference} | left difference: ${leftDifference}`
+      //   );
 
       // If there's a significant vertical gap, mark for spacing
-      if (bottomDifference > 30) {
-        previousSpan.setAttribute("data-needs-spacing", "true");
+      if (
+        bottomDifference < 0.87 ||
+        leftDifference > 0.99 ||
+        leftDifference < 0.1
+      ) {
+        // log(`adding spacing before: ${currentSpan.textContent}`);
+        currentSpan.setAttribute("data-needs-spacing", "true");
       }
     }
   }
 
-  // Second pass: Insert spaces where needed
+  // Second pass: Insert spaces where needed, but before the span elements instead of inside them
   for (const span of document.querySelectorAll(
     'span[data-needs-spacing="true"]'
   )) {
-    // Insert a space at the beginning of the span
-    const textNode = span.firstChild;
-    if (textNode && textNode.nodeType === Node.TEXT_NODE) {
-      textNode.textContent = " " + textNode.textContent;
+    // Insert a space before the span element (not inside it)
+    if (span.parentElement) {
+      span.parentElement.insertBefore(document.createTextNode(" "), span);
+      // log(`inserted space before span: ${span.textContent}`);
     } else {
-      span.insertBefore(document.createTextNode(" "), span.firstChild);
+      //   logErrorMessage(
+      //     `Failed to insert space before span: ${span.textContent}`
+      //   );
     }
 
     // Remove the marker attribute
     span.removeAttribute("data-needs-spacing");
-  }
-
-  // Handle spans that contain word-spacing style (these already have explicit spacing)
-  const wordSpacedSpans = document.querySelectorAll(
-    'span[style*="word-spacing"]'
-  );
-  for (const span of wordSpacedSpans) {
-    // Ensure the browser's implicit spacing is preserved in extracted text
-    if (span.textContent.trim() && !span.textContent.includes(" ")) {
-      span.innerHTML = span.innerHTML.replace(
-        /(<[^>]+>)([^\s<]+)(<[^>]+>|$)/g,
-        "$1$2 $3"
-      );
-    }
   }
 }
 
@@ -384,6 +406,11 @@ export function DecorationGroup(groupId, groupName) {
     function positionElement(element, rect, boundingRect) {
       element.style.position = "absolute";
 
+      log(`layout style width: ${style.width}`);
+      log(`layout element style width: ${element.style.width}`);
+      log(`layout rect width: ${rect.width}`);
+      log(`layout rect left: ${rect.left}`);
+
       if (style.width === "wrap") {
         element.style.width = `${rect.width}px`;
         element.style.height = `${rect.height}px`;
@@ -558,13 +585,6 @@ export function DecorationGroup(groupId, groupName) {
     let computedWidth = undefined;
     let computedHeight = undefined;
 
-    log(`BEFORE ACCESSING USER INFO`);
-    log(`user info = ${item.decoration.userInfo.useComputedStyle}`);
-
-    // if (
-    //   item.decoration.userInfo !== undefined &&
-    //   item.decoration.userInfo.useComputedStyle == 1
-    // ) {
     // Climb up the tree until you reach .text-overlay (or whatever class you expect)
     const textOverlayElement = startNode.closest(".text-overlay");
     let ocrLayout = false;
@@ -696,6 +716,7 @@ export function DecorationGroup(groupId, groupName) {
   function requireContainer() {
     if (!container) {
       container = document.createElement("div");
+      container.classList.add("my-general-container");
       container.setAttribute("id", groupId);
       container.setAttribute("data-group", groupName);
       container.style.setProperty("pointer-events", "none");

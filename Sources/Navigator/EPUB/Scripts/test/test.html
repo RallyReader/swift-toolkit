@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Decorator Tests</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
+    #test-results {
+      border: 1px solid #ddd;
+      padding: 10px;
+      margin-top: 10px;
+      min-height: 200px;
+      max-height: 600px;
+      overflow-y: auto;
+    }
+    .pass {
+      color: green;
+    }
+    .fail {
+      color: red;
+    }
+    h3 {
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Decorator Tests</h1>
+  <button id="run-tests">Run Tests</button>
+  <h3>Test Results:</h3>
+  <div id="test-results"></div>
+  
+  <script>
+    // Define test utilities
+    function countWords(text) {
+      return text
+        .trim()
+        .split(/\s+/)
+        .filter(word => word.length > 0).length;
+    }
+    
+    // Process spans for text spacing - simplified version of the actual function
+    function processSpansForTextSpacing() {
+      // Get all spans in the document
+      const nodes = document.querySelectorAll("span, div");
+      
+      // First pass: Process spans and mark those that need spacing
+      for (const node of nodes) {
+        if (node.nodeName.toLowerCase() === 'div') {
+          if (node.style.bottom === undefined) {
+            if (node.parentElement) {
+              node.parentElement.insertBefore(document.createTextNode("\n"), node);
+            }
+            continue;
+          }
+        }
+        
+        // If this span has a previous sibling span with different style properties
+        const previousSibling = node.previousElementSibling;
+        if (previousSibling && previousSibling.nodeName.toLowerCase() === 'span') {
+          // Check bottom values
+          if (node.style.bottom && previousSibling.style.bottom) {
+            const currentBottom = parseFloat(node.style.bottom || "0");
+            const previousBottom = parseFloat(previousSibling.style.bottom || "0");
+            const bottomDifference = previousBottom < currentBottom 
+              ? previousBottom / currentBottom 
+              : currentBottom / previousBottom;
+              
+            if (bottomDifference < 0.85) {
+              node.setAttribute("data-needs-spacing", "true");
+            }
+          }
+          
+          // Check left values
+          if (node.style.left && previousSibling.style.left) {
+            const currentLeft = parseFloat(node.style.left || "0");
+            const previousLeft = parseFloat(previousSibling.style.left || "0");
+            const leftDifference = previousLeft < currentLeft
+              ? previousLeft / currentLeft
+              : currentLeft / previousLeft;
+              
+            if (leftDifference > 0.99 || leftDifference < 0.1) {
+              node.setAttribute("data-needs-spacing", "true");
+            }
+          }
+        }
+        
+        // Handle word-spacing style
+        if (node.style.wordSpacing) {
+          node.setAttribute("data-needs-spacing", "true");
+        }
+      }
+      
+      // Second pass: Insert spaces
+      const markedNodes = document.querySelectorAll('[data-needs-spacing="true"]');
+      for (const node of markedNodes) {
+        if (node.parentElement) {
+          node.parentElement.insertBefore(document.createTextNode(" "), node);
+        }
+        node.removeAttribute("data-needs-spacing");
+      }
+      
+      // Replace Unicode ligature 'ff'
+      const allElements = document.querySelectorAll('*');
+      for (const el of allElements) {
+        if (el.textContent.includes('\ufb00')) {
+          el.textContent = el.textContent.replace(/\ufb00/g, "ff");
+        }
+      }
+    }
+    
+    // Define test cases
+    const testCases = [
+      {
+        name: "Basic span test",
+        html: "<div><span style='bottom: 10px;'>Hello</span><span style='bottom: 10px;'>World</span></div>",
+        expected: 2,
+      },
+      {
+        name: "Spans with different bottoms",
+        html: "<div><span style='bottom: 20px;'>First</span><span style='bottom: 10px;'>Second</span></div>",
+        expected: 2,
+      },
+      {
+        name: "Spans with different left values",
+        html: "<div><span style='left: 10px; bottom: 10px;'>Left1</span><span style='left: 100px; bottom: 10px;'>Left2</span></div>",
+        expected: 2,
+      },
+      {
+        name: "Div elements",
+        html: "<div>Text before</div><div style='bottom: 10px;'>Div content</div>",
+        expected: 3,
+      },
+      {
+        name: "Word spacing attribute",
+        html: "<div><span style='word-spacing: 5px;'>Spaced</span><span>Text</span></div>",
+        expected: 2,
+      },
+      {
+        name: "Mixed elements",
+        html: "<div><span style='bottom: 20px;'>Top</span><span style='bottom: 10px;'>Bottom</span><div>New line</div></div>",
+        expected: 3,
+      },
+      {
+        name: "Unicode ligature replacement",
+        html: "<div><span>\ufb00ancy</span></div>",
+        expected: 1,
+      },
+      {
+        name: "Multiple words in spans",
+        html: "<div><span style='bottom: 10px;'>Hello beautiful</span><span style='bottom: 10px;'>wonderful world</span></div>",
+        expected: 4,
+      },
+      {
+        name: "Empty spans",
+        html: "<div><span style='bottom: 10px;'></span><span style='bottom: 10px;'>Word</span></div>",
+        expected: 1,
+      },
+    ];
+    
+    // Function to add a log message to the results
+    function addLogToResults(message, isError = false) {
+      const resultsDiv = document.getElementById('test-results');
+      const logLine = document.createElement('div');
+      logLine.textContent = message;
+      
+      if (isError) {
+        logLine.classList.add('fail');
+      } else if (message.includes('PASS')) {
+        logLine.classList.add('pass');
+      }
+      
+      resultsDiv.appendChild(logLine);
+    }
+    
+    // Run all tests function
+    function runTests() {
+      addLogToResults("Running tests for processSpansForTextSpacing");
+      
+      // Create a test area that's hidden from view
+      const testArea = document.createElement('div');
+      testArea.id = 'test-area';
+      testArea.style.position = 'absolute';
+      testArea.style.left = '-9999px';
+      document.body.appendChild(testArea);
+      
+      testCases.forEach((testCase) => {
+        addLogToResults(`Running test: ${testCase.name}`);
+        
+        try {
+          // Set up the test HTML
+          testArea.innerHTML = testCase.html;
+          
+          // Process the document
+          processSpansForTextSpacing();
+          
+          // Get the result and count words
+          const resultText = testArea.textContent;
+          const wordCount = countWords(resultText);
+          
+          // Check if the word count matches the expected count
+          if (wordCount === testCase.expected) {
+            addLogToResults(`✅ PASS: ${testCase.name}`);
+          } else {
+            addLogToResults(`❌ FAIL: ${testCase.name}`, true);
+            addLogToResults(`  Expected word count: ${testCase.expected}`, true);
+            addLogToResults(`  Actual word count:   ${wordCount}`, true);
+            addLogToResults(`  Actual text: "${resultText}"`, true);
+          }
+        } catch (error) {
+          addLogToResults(`❌ ERROR in test ${testCase.name}: ${error.message}`, true);
+          console.error(error); // Log full error to console for debugging
+        }
+        
+        // Clean up for next test
+        testArea.innerHTML = '';
+      });
+      
+      // Clean up test area
+      testArea.remove();
+      
+      addLogToResults("All tests completed");
+    }
+    
+    // Set up event listener for run button
+    document.getElementById('run-tests').addEventListener('click', function() {
+      // Clear previous results
+      document.getElementById('test-results').innerHTML = '';
+      
+      // Run the tests
+      runTests();
+    });
+  </script>
+</body>
+</html>
