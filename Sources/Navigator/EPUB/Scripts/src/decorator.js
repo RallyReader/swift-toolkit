@@ -69,12 +69,12 @@ export function registerTemplates(newStyles) {
   `;
   document.head.appendChild(imgStyle);
 
-  log(`Document body html content: ${document.body.innerHTML}`);
+  log(`Document html content: ${document.innerHTML}`);
 
   // Process span elements to ensure proper text spacing
-  log(`Document body text content BEFORE: ${document.body.textContent}`);
+  // log(`Document body text content BEFORE: ${document.body.textContent}`);
   processSpansForTextSpacing();
-  log(`Document body text content AFTER: ${document.body.textContent}`);
+  // log(`Document body text content AFTER: ${document.body.textContent}`);
 
   // log(
   //   `DID REGISTER TEMPLATES for ${
@@ -88,8 +88,29 @@ export function registerTemplates(newStyles) {
  * This prevents words from being incorrectly stitched together when extracting text.
  */
 function processSpansForTextSpacing() {
-  // Replace Unicode ligature 'ff' (U+FB00) with regular 'ff'
-  document.body.innerHTML = document.body.innerHTML.replace(/\ufb00/g, "ff");
+  // Create a mapping of Unicode ligatures to their regular character equivalents
+  const ligatureMap = {
+    "\uFB00": "ff", // ﬀ -> ff
+    "\uFB01": "fi", // ﬁ -> fi
+    "\uFB02": "fl", // ﬂ -> fl
+    "\uFB03": "ffi", // ﬃ -> ffi
+    "\uFB04": "ffl", // ﬄ -> ffl
+    "\uFB05": "st", // ﬅ -> st
+    "\uFB06": "st", // ﬆ -> st
+    "\u0132": "IJ", // Ĳ -> IJ
+    "\u0133": "ij", // ĳ -> ij
+    "\u0152": "OE", // Œ -> OE
+    "\u0153": "oe", // œ -> oe
+  };
+
+  // Replace all ligatures in one pass using a function
+  const ligaturePattern = new RegExp(Object.keys(ligatureMap).join("|"), "g");
+  document.body.innerHTML = document.body.innerHTML.replace(
+    ligaturePattern,
+    (match) => ligatureMap[match]
+  );
+
+  // Continue with the rest of the function
   document.body.innerHTML = document.body.innerHTML.replace(
     /<br\s*\/>/g,
     "$&\n"
