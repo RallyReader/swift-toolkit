@@ -913,6 +913,14 @@ open class EPUBNavigatorViewController: UIViewController,
         }
     }
     
+    public func spreadHasFixedLayout(href: String) -> Bool? {
+        if let spreadView = loadedSpreadView(forHREF: href) {
+            return spreadView.spread.layout == .fixed
+        }
+        
+        return nil
+    }
+    
 //    public func documentHasOCRContainer(href: String) 
     
     public func currentSpreadDisplayingLastPage() -> Bool {
