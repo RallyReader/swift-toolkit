@@ -71,8 +71,7 @@ export function registerTemplates(newStyles) {
 
   log(`Document html content: ${document.innerHTML}`);
 
-  // Process span elements to ensure proper text spacing
-  // log(`Document body text content BEFORE: ${document.body.textContent}`);
+  // Process span elements to ensure proper text spacing and handle HTML entities
   processSpansForTextSpacing();
   // log(`Document body text content AFTER: ${document.body.textContent}`);
 
@@ -88,6 +87,27 @@ export function registerTemplates(newStyles) {
  * This prevents words from being incorrectly stitched together when extracting text.
  */
 function processSpansForTextSpacing() {
+  // Create a mapping of HTML entities to their character equivalents
+  const entityMap = {
+    "&rsquo;": "'", // right single quote
+    "&lsquo;": "'", // left single quote
+    "&rdquo;": '"', // right double quote
+    "&ldquo;": '"', // left double quote
+    "&ndash;": "–", // en dash
+    "&mdash;": "—", // em dash
+    "&nbsp;": " ", // non-breaking space
+    "&amp;": "&", // ampersand
+    "&lt;": "<", // less than
+    "&gt;": ">", // greater than
+  };
+
+  // Handle HTML entities - decode them properly
+  const entityPattern = new RegExp(Object.keys(entityMap).join("|"), "gi");
+  document.body.innerHTML = document.body.innerHTML.replace(
+    entityPattern,
+    (match) => entityMap[match.toLowerCase()]
+  );
+
   // Create a mapping of Unicode ligatures to their regular character equivalents
   const ligatureMap = {
     "\uFB00": "ff", // ﬀ -> ff
