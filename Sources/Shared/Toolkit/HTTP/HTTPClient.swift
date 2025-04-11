@@ -141,8 +141,18 @@ public extension HTTPClient {
                     completion(.failure(HTTPError(kind: .other)))
                 } else {
                     fileHandle.seekToEndOfFile()
-                    fileHandle.write(data)
-                    
+                    do {
+                        if #available(iOS 13.4, *) {
+                            try fileHandle.write(contentsOf: data)
+                        } else {
+                            // Fallback on earlier versions
+                            fileHandle.write(data)
+                        }
+                    } catch {
+                        completion(.failure(HTTPError(kind: .ioError, cause: error)))
+                        return
+                    }
+
                     if let progression = progression {
                         onProgress(progression)
                     }
