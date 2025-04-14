@@ -329,10 +329,25 @@ export function DecorationGroup(groupId, groupName) {
 
     let item = { id, decoration, range };
     items.push(item);
-    layout(item);
+    layout(item, true);
   }
 
   function addEnhanced(decoration) {
+<<<<<<< Updated upstream
+    // // Check for any variation of dashes (hyphen, en-dash, em-dash)
+    // if (decoration.locator.text.before.match(/[\-\u2013\u2014]$/)) {
+    //   log("Decoration locator ends in dash (hyphen, en-dash, or em-dash)");
+    //   add(decoration, true);
+    //   return;
+    // }
+=======
+    if (decoration.locator.text.before.endsWith("-")) {
+      log("Decoration locator ends in dash");
+      add(decoration);
+      return;
+    }
+>>>>>>> Stashed changes
+
     let id = groupId + "-" + lastItemId++;
 
     let range = rangeFromLocator(decoration.locator);
@@ -413,13 +428,13 @@ export function DecorationGroup(groupId, groupName) {
   function requestLayout() {
     clearContainer();
     clearAllEnhanced();
-    items.forEach((item) => layout(item));
+    items.forEach((item) => layout(item, false));
   }
 
   /**
    * Layouts a single Decoration item.
    */
-  function layout(item) {
+  function layout(item, postMessage) {
     let groupContainer = requireContainer();
 
     let style = styles.get(item.decoration.style);
@@ -529,6 +544,15 @@ export function DecorationGroup(groupId, groupName) {
     );
     if (item.clickableElements.length === 0) {
       item.clickableElements = Array.from(itemContainer.children);
+    }
+
+    if (postMessage) {
+      webkit.messageHandlers.decorationRect.postMessage({
+        id: item.decoration.id,
+        group: groupName,
+        rect: toNativeRect(boundingRect),
+        ocrLayout: false,
+      });
     }
   }
 
