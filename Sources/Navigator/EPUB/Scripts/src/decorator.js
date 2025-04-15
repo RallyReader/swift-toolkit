@@ -333,21 +333,6 @@ export function DecorationGroup(groupId, groupName) {
   }
 
   function addEnhanced(decoration) {
-<<<<<<< Updated upstream
-    // // Check for any variation of dashes (hyphen, en-dash, em-dash)
-    // if (decoration.locator.text.before.match(/[\-\u2013\u2014]$/)) {
-    //   log("Decoration locator ends in dash (hyphen, en-dash, or em-dash)");
-    //   add(decoration, true);
-    //   return;
-    // }
-=======
-    if (decoration.locator.text.before.endsWith("-")) {
-      log("Decoration locator ends in dash");
-      add(decoration);
-      return;
-    }
->>>>>>> Stashed changes
-
     let id = groupId + "-" + lastItemId++;
 
     let range = rangeFromLocator(decoration.locator);
