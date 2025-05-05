@@ -543,10 +543,8 @@ export function DecorationGroup(groupId, groupName) {
 
   function isPageNumber(text) {
     const trimmedText = text.trim();
-    return (
-      /^[ivxlcdmIVXLCDM\d\s\-–—.]+$/.test(trimmedText) &&
-      (/\d/.test(trimmedText) || /^[ivxlcdmIVXLCDM]+$/.test(trimmedText))
-    );
+    // Only return true for strings that consist entirely of digits
+    return /^\d+$/.test(trimmedText);
   }
 
   function layoutEnhanced(item, postMessage) {
