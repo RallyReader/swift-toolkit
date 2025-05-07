@@ -989,17 +989,21 @@ open class EPUBNavigatorViewController: UIViewController,
             }
 
         } else {
-            if decorations.isEmpty == false {
-                print("wefwf")
-            }
-            for (href, changes) in target.changesByHREF(from: source, enhanced: enhanced) {
+           for (href, changes) in target.changesByHREF(from: source, enhanced: enhanced) {
                 guard let script = changes.javascript(forGroup: group, styles: config.decorationTemplates) else {
                     continue
                 }
                 print("decorations script: \(script)")
                 let loadedSpread = loadedSpreadView(forHREF: href)
                 if let loadedSpread = loadedSpread {
-                    loadedSpread.evaluateScript(script, inHREF: href)
+                    loadedSpread.evaluateScript(script, inHREF: href) { result in
+                        switch(result){
+                        case .failure(let error):
+                            print("error: \(error.localizedDescription)")
+                        case .success(let success):
+                            print("success")
+                        }
+                    }
                 } else {
                     print("spread not loaded: \(href)")
                 }
@@ -1025,16 +1029,38 @@ open class EPUBNavigatorViewController: UIViewController,
         
 //        print("ADD DECORATIONS ENHANCED: \(decorations.count)")
         
-        let decorationChanges = decorations.map {enhanced ? DecorationChange.addEnhanced($0) : DecorationChange.add($0)}
+        for (href, changes) in target.changesByHREF(from: [], enhanced: enhanced) {
+             guard let script = changes.javascript(forGroup: group, styles: config.decorationTemplates) else {
+                 continue
+             }
+             print("decorations script: \(script)")
+             let loadedSpread = loadedSpreadView(forHREF: href)
+             if let loadedSpread = loadedSpread {
+                 loadedSpread.evaluateScript(script, inHREF: href) { result in
+                     switch(result){
+                     case .failure(let error):
+                         print("evaluateScript error: \(error.localizedDescription)")
+                     case .success(let success):
+                         print("evaluateScript success")
+                     }
+                 }
+             } else {
+                 print("spread not loaded: \(href)")
+             }
+         }
         
-        if let script = decorationChanges.javascript(forGroup: group, styles: config.decorationTemplates) {
-//            print("ADD DECORATIONS script: \(script)")
-            self.loadedSpreadView(forHREF: decorations[0].locator.href)?.evaluateScript(script, inHREF: decorations[0].locator.href) { _ in
-                completion()
-            }
-        } else {
-            completion()
-        }
+        completion()
+        
+//        let decorationChanges = decorations.map {enhanced ? DecorationChange.addEnhanced($0) : DecorationChange.add($0)}
+//        
+//        if let script = decorationChanges.javascript(forGroup: group, styles: config.decorationTemplates) {
+////            print("ADD DECORATIONS script: \(script)")
+//            self.loadedSpreadView(forHREF: decorations[0].locator.href)?.evaluateScript(script, inHREF: decorations[0].locator.href) { _ in
+//                completion()
+//            }
+//        } else {
+//            completion()
+//        }
     }
 
     public func observeDecorationInteractions(inGroup group: String, onActivated: OnActivatedCallback?) {

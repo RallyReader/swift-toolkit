@@ -578,8 +578,9 @@ export function DecorationGroup(groupId, groupName) {
         `bounding rect: {left: ${boundingRect.left}, top: ${boundingRect.top}, width: ${boundingRect.width}, height: ${boundingRect.height} for: ${item.range}}`
       );
       if (
-        boundingRect.left + boundingRect.width < 0 ||
-        boundingRect.top + boundingRect.height < 0
+        item.decoration.userInfo.shoulNotBeIgnored !== true &&
+        (boundingRect.left + boundingRect.width < 0 ||
+          boundingRect.top + boundingRect.height < 0)
       ) {
         postMessageWithInvalidRect();
         return;
