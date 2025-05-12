@@ -49,7 +49,7 @@ export function registerTemplates(newStyles) {
       width: 100%;
       height: 100%;
       top: 0px;
-    }
+      }
   `;
   document.head.appendChild(containStyle);
 
@@ -880,6 +880,7 @@ export function DecorationGroup(groupId, groupName) {
         visibleArea.style.width = `${viewportWidth}px`;
         visibleArea.style.height = `${window.innerHeight}px`;
         visibleArea.style.pointerEvents = "none"; // Allow interactions to pass through
+        visibleArea.style.zIndex = "999"; // Make sure it's above the content but below any UI
         document.body.appendChild(visibleArea);
 
         newArea = true;
