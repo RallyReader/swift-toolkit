@@ -701,6 +701,8 @@ export function DecorationGroup(groupId, groupName) {
     let computedWidth = undefined;
     let computedHeight = undefined;
     let rotationAngle = undefined;
+    let computedLeft = undefined;
+    let computedTop = undefined;
 
     // Climb up the tree until you reach .text-overlay
     const textOverlayElement = startNode.closest(".text-overlay");
@@ -709,10 +711,86 @@ export function DecorationGroup(groupId, groupName) {
       ocrLayout = true;
       // Now you can call getComputedStyle on that element
       const computedStyle = window.getComputedStyle(textOverlayElement);
-      log("Computed width:", computedStyle.width);
-      log("Computed height:", computedStyle.height);
       computedWidth = computedStyle.width;
       computedHeight = computedStyle.height;
+
+      // Get the actual bounding rect of the text-overlay element for precise positioning
+      const overlayRect = textOverlayElement.getBoundingClientRect();
+
+      // Get the parent ocr-container's position to understand the coordinate system
+      const ocrContainer = textOverlayElement.closest(".ocr-container");
+      if (ocrContainer && ocrLayout) {
+        // Only apply OCR-specific positioning logic when ocrLayout is true
+        // const ocrRect = ocrContainer.getBoundingClientRect();
+        // Check if there's an image inside that might have different dimensions
+        const img = ocrContainer.querySelector("img");
+        if (img) {
+          const imgRect = img.getBoundingClientRect();
+
+          // CRITICAL: Text-overlay percentages are relative to the NATURAL image size,
+          // but the image might be scaled. We need to calculate the scale factor.
+          // const scaleX = imgRect.width / img.naturalWidth;
+          // const scaleY = imgRect.height / img.naturalHeight;
+
+          // The text-overlay's percentage positioning is based on natural size,
+          // so when the image is scaled, the overlays are positioned incorrectly.
+          // We need to get the INTENDED position based on the natural size percentages.
+
+          // Extract the percentage values from the text-overlay's inline style
+          const styleTop = textOverlayElement.style.top;
+          const styleLeft = textOverlayElement.style.left;
+          const styleWidth = textOverlayElement.style.width;
+          const styleHeight = textOverlayElement.style.height;
+
+          // Parse percentages and calculate actual pixel positions on the SCALED image
+          if (
+            styleTop &&
+            styleLeft &&
+            styleTop.includes("%") &&
+            styleLeft.includes("%")
+          ) {
+            const topPercent = parseFloat(styleTop) / 100;
+            const leftPercent = parseFloat(styleLeft) / 100;
+
+            // Calculate position on the scaled image
+            const scaledTop = imgRect.top + imgRect.height * topPercent;
+            const scaledLeft = imgRect.left + imgRect.width * leftPercent;
+
+            // Use the calculated position instead of getBoundingClientRect
+            computedLeft = scaledLeft;
+            computedTop = scaledTop;
+
+            // Also calculate scaled width and height
+            if (
+              styleWidth &&
+              styleHeight &&
+              styleWidth.includes("%") &&
+              styleHeight.includes("%")
+            ) {
+              const widthPercent = parseFloat(styleWidth) / 100;
+              const heightPercent = parseFloat(styleHeight) / 100;
+
+              const scaledWidth = imgRect.width * widthPercent;
+              const scaledHeight = imgRect.height * heightPercent;
+
+              computedWidth = `${scaledWidth}px`;
+              computedHeight = `${scaledHeight}px`;
+            }
+          } else {
+            // Fallback to using the overlay rect
+            computedLeft = overlayRect.left;
+            computedTop = overlayRect.top;
+          }
+        } else {
+          // No image found, use overlay rect
+          computedLeft = overlayRect.left;
+          computedTop = overlayRect.top;
+        }
+      } else {
+        // Fallback: not OCR layout or no ocr-container found, use overlay rect
+        computedLeft = overlayRect.left;
+        computedTop = overlayRect.top;
+      }
 
       // Extract rotation from transform style
       const transform = computedStyle.transform;
@@ -723,7 +801,6 @@ export function DecorationGroup(groupId, groupName) {
           const rotateMatch = inlineStyle.match(/rotate\(([-\d.]+)deg\)/);
           if (rotateMatch) {
             rotationAngle = parseFloat(rotateMatch[1]);
-            log("Extracted rotation angle:", rotationAngle);
           }
         }
       }
@@ -733,16 +810,56 @@ export function DecorationGroup(groupId, groupName) {
     // }
 
     // Position the decoration element inside the page container
-    function positionElement(element, rect, boundingRect) {
-      element.style.position = "absolute";
+    function positionElement(
+      element,
+      rect,
+      boundingRect,
+      useOverlayPosition = false
+    ) {
+      // For OCR layouts, use fixed positioning to match viewport-relative coordinates
+      // For regular layouts, use absolute positioning
+      element.style.position = useOverlayPosition ? "fixed" : "absolute";
       log(`style width: ${style.width}`);
       log(`element style width: ${element.style.width}`);
       log(`rect width: ${rect.width}`);
       log(`rect left: ${rect.left}`);
       log(`applying computed width: ${computedWidth}`);
 
+      // Use computed position from text-overlay only if explicitly requested and available
+      // For boxes layout with multiple rects, we should use individual rect positions
+      let leftPos =
+        useOverlayPosition && computedLeft !== undefined
+          ? computedLeft
+          : rect.left;
+      let topPos =
+        useOverlayPosition && computedTop !== undefined
+          ? computedTop
+          : rect.top;
+
+      log(
+        `Using position - left: ${leftPos}, top: ${topPos} (useOverlayPosition: ${useOverlayPosition})`
+      );
+
+      log(
+        "Debug positioning - yOffset:",
+        yOffset,
+        "leftPos:",
+        leftPos,
+        "topPos:",
+        topPos
+      );
+
+      // For fixed positioning (OCR with overlay position), don't add offsets
+      // For absolute positioning (normal content), add offsets
+      let finalXOffset = useOverlayPosition ? 0 : xOffset;
+      let finalYOffset = useOverlayPosition ? 0 : yOffset;
+
       if (style.width === "wrap") {
-        if (computedWidth !== undefined && computedHeight !== undefined) {
+        if (
+          useOverlayPosition &&
+          computedWidth !== undefined &&
+          computedHeight !== undefined
+        ) {
           element.style.width = `${computedWidth}`;
           element.style.height = `${computedHeight}`;
         } else {
@@ -750,23 +867,43 @@ export function DecorationGroup(groupId, groupName) {
           element.style.height = `${rect.height}px`;
         }
 
-        element.style.left = `${rect.left + xOffset}px`; // Position within the page
-        element.style.top = `${rect.top + yOffset}px`;
+        element.style.left = `${leftPos + finalXOffset}px`;
+        element.style.top = `${topPos + finalYOffset}px`;
+        log(
+          `Set element position - left: ${leftPos + finalXOffset}px, top: ${
+            topPos + finalYOffset
+          }px`
+        );
       } else if (style.width === "viewport") {
         element.style.width = `${viewportWidth}px`;
         element.style.height = `${rect.height}px`;
-        element.style.left = `${xOffset}px`; // Position within the page
-        element.style.top = `${rect.top + yOffset}px`;
+        element.style.left = `${finalXOffset}px`;
+        element.style.top = `${topPos + finalYOffset}px`;
+        log(
+          `Set element position - left: ${finalXOffset}px, top: ${
+            topPos + finalYOffset
+          }px`
+        );
       } else if (style.width === "bounds") {
         element.style.width = `${boundingRect.width}px`;
         element.style.height = `${rect.height}px`;
-        element.style.left = `${boundingRect.left + xOffset}px`;
-        element.style.top = `${rect.top + yOffset}px`;
+        element.style.left = `${boundingRect.left + finalXOffset}px`;
+        element.style.top = `${topPos + finalYOffset}px`;
+        log(
+          `Set element position - left: ${
+            boundingRect.left + finalXOffset
+          }px, top: ${topPos + finalYOffset}px`
+        );
       } else if (style.width === "page") {
         element.style.width = `${viewportWidth}px`;
         element.style.height = `${rect.height}px`;
-        element.style.left = `${xOffset}px`;
-        element.style.top = `${rect.top + yOffset}px`;
+        element.style.left = `${finalXOffset}px`;
+        element.style.top = `${topPos + finalYOffset}px`;
+        log(
+          `Set element position - left: ${finalXOffset}px, top: ${
+            topPos + finalYOffset
+          }px`
+        );
       }
 
       // Apply rotation transform if present
@@ -810,16 +947,21 @@ export function DecorationGroup(groupId, groupName) {
 
         log(`client rects: ${clientRects.length} for ${item.range}`);
 
+        // For single rect with text-overlay, use overlay position
+        // For multiple rects, use individual rect positions
+        let useOverlay = clientRects.length === 1 && ocrLayout;
+
         for (let clientRect of clientRects) {
           const line = elementTemplate.cloneNode(true);
           line.style.setProperty("pointer-events", "none");
-          positionElement(line, clientRect, boundingRect);
+          positionElement(line, clientRect, boundingRect, useOverlay);
           itemContainer.append(line);
         }
       } else if (style.layout === "bounds") {
         const bounds = elementTemplate.cloneNode(true);
         bounds.style.setProperty("pointer-events", "none");
-        positionElement(bounds, boundingRect, boundingRect);
+        // Use overlay position for bounds layout when available
+        positionElement(bounds, boundingRect, boundingRect, ocrLayout);
 
         itemContainer.append(bounds);
       }
