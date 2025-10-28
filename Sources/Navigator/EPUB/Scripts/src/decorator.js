@@ -700,8 +700,9 @@ export function DecorationGroup(groupId, groupName) {
     // Use computed style width and height instead of the one returned by boundingRect
     let computedWidth = undefined;
     let computedHeight = undefined;
+    let rotationAngle = undefined;
 
-    // Climb up the tree until you reach .text-overlay (or whatever class you expect)
+    // Climb up the tree until you reach .text-overlay
     const textOverlayElement = startNode.closest(".text-overlay");
     let ocrLayout = false;
     if (textOverlayElement) {
@@ -712,6 +713,20 @@ export function DecorationGroup(groupId, groupName) {
       log("Computed height:", computedStyle.height);
       computedWidth = computedStyle.width;
       computedHeight = computedStyle.height;
+
+      // Extract rotation from transform style
+      const transform = computedStyle.transform;
+      if (transform && transform !== "none") {
+        // Try to extract rotation from inline style first (more accurate for rotate() values)
+        const inlineStyle = textOverlayElement.style.transform;
+        if (inlineStyle) {
+          const rotateMatch = inlineStyle.match(/rotate\(([-\d.]+)deg\)/);
+          if (rotateMatch) {
+            rotationAngle = parseFloat(rotateMatch[1]);
+            log("Extracted rotation angle:", rotationAngle);
+          }
+        }
+      }
     } else {
       log("No .text-overlay parent found for this range.");
     }
@@ -752,6 +767,13 @@ export function DecorationGroup(groupId, groupName) {
         element.style.height = `${rect.height}px`;
         element.style.left = `${xOffset}px`;
         element.style.top = `${rect.top + yOffset}px`;
+      }
+
+      // Apply rotation transform if present
+      if (rotationAngle !== undefined) {
+        element.style.transform = `rotate(${rotationAngle}deg)`;
+        element.style.transformOrigin = "center";
+        log(`Applied rotation: ${rotationAngle}deg`);
       }
     }
 
