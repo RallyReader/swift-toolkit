@@ -4,7 +4,7 @@
 //  available in the top-level LICENSE file of the project.
 //
 
-import { log as logNative, logError } from "./utils";
+import { log as logNative, logError, getOCRCorrectedRect } from "./utils";
 import { toNativeRect } from "./rect";
 import { TextRange } from "./vendor/hypothesis/anchoring/text-range";
 
@@ -60,6 +60,13 @@ function getSelectionRect() {
     }
     let range = sel.getRangeAt(0);
 
+    // Try to get OCR-corrected rect first (for scaled images)
+    const ocrRect = getOCRCorrectedRect(range);
+    if (ocrRect) {
+      return toNativeRect(ocrRect);
+    }
+
+    // Fallback to standard rect for non-OCR content
     return toNativeRect(range.getBoundingClientRect());
   } catch (e) {
     logError(e);

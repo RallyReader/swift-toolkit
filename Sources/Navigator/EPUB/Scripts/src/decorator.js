@@ -9,7 +9,12 @@ import {
   rectContainsPoint,
   toNativeRect,
 } from "./rect";
-import { log, logErrorMessage, rangeFromLocator } from "./utils";
+import {
+  log,
+  logErrorMessage,
+  rangeFromLocator,
+  getOCRCorrectedRect,
+} from "./utils";
 
 // Polyfill for iOS 13.3
 import { ResizeObserver as ResizeObserverPolyfill } from "@juggle/resize-observer";
@@ -689,125 +694,44 @@ export function DecorationGroup(groupId, groupName) {
     // log(`computed style width: ${computedStyle.width}`);
     // log(`computed style height: ${computedStyle.height}`);
 
-    // 1. Get the DOM node from the range
-    let startNode = item.range.startContainer;
-
-    // 2. If the startNode is a text node, go up to its parent element.
-    if (startNode.nodeType === Node.TEXT_NODE) {
-      startNode = startNode.parentElement;
-    }
-
-    // Use computed style width and height instead of the one returned by boundingRect
+    // Try to get OCR-corrected rect for positioning
+    const ocrRect = getOCRCorrectedRect(item.range);
+    let ocrLayout = false;
+    let computedLeft = undefined;
+    let computedTop = undefined;
     let computedWidth = undefined;
     let computedHeight = undefined;
     let rotationAngle = undefined;
-    let computedLeft = undefined;
-    let computedTop = undefined;
 
-    // Climb up the tree until you reach .text-overlay
-    const textOverlayElement = startNode.closest(".text-overlay");
-    let ocrLayout = false;
-    if (textOverlayElement) {
+    if (ocrRect) {
       ocrLayout = true;
-      // Now you can call getComputedStyle on that element
-      const computedStyle = window.getComputedStyle(textOverlayElement);
-      computedWidth = computedStyle.width;
-      computedHeight = computedStyle.height;
+      computedLeft = ocrRect.left;
+      computedTop = ocrRect.top;
+      computedWidth = `${ocrRect.width}px`;
+      computedHeight = `${ocrRect.height}px`;
 
-      // Get the actual bounding rect of the text-overlay element for precise positioning
-      const overlayRect = textOverlayElement.getBoundingClientRect();
-
-      // Get the parent ocr-container's position to understand the coordinate system
-      const ocrContainer = textOverlayElement.closest(".ocr-container");
-      if (ocrContainer && ocrLayout) {
-        // Only apply OCR-specific positioning logic when ocrLayout is true
-        // const ocrRect = ocrContainer.getBoundingClientRect();
-        // Check if there's an image inside that might have different dimensions
-        const img = ocrContainer.querySelector("img");
-        if (img) {
-          const imgRect = img.getBoundingClientRect();
-
-          // CRITICAL: Text-overlay percentages are relative to the NATURAL image size,
-          // but the image might be scaled. We need to calculate the scale factor.
-          // const scaleX = imgRect.width / img.naturalWidth;
-          // const scaleY = imgRect.height / img.naturalHeight;
-
-          // The text-overlay's percentage positioning is based on natural size,
-          // so when the image is scaled, the overlays are positioned incorrectly.
-          // We need to get the INTENDED position based on the natural size percentages.
-
-          // Extract the percentage values from the text-overlay's inline style
-          const styleTop = textOverlayElement.style.top;
-          const styleLeft = textOverlayElement.style.left;
-          const styleWidth = textOverlayElement.style.width;
-          const styleHeight = textOverlayElement.style.height;
-
-          // Parse percentages and calculate actual pixel positions on the SCALED image
-          if (
-            styleTop &&
-            styleLeft &&
-            styleTop.includes("%") &&
-            styleLeft.includes("%")
-          ) {
-            const topPercent = parseFloat(styleTop) / 100;
-            const leftPercent = parseFloat(styleLeft) / 100;
-
-            // Calculate position on the scaled image
-            const scaledTop = imgRect.top + imgRect.height * topPercent;
-            const scaledLeft = imgRect.left + imgRect.width * leftPercent;
-
-            // Use the calculated position instead of getBoundingClientRect
-            computedLeft = scaledLeft;
-            computedTop = scaledTop;
-
-            // Also calculate scaled width and height
-            if (
-              styleWidth &&
-              styleHeight &&
-              styleWidth.includes("%") &&
-              styleHeight.includes("%")
-            ) {
-              const widthPercent = parseFloat(styleWidth) / 100;
-              const heightPercent = parseFloat(styleHeight) / 100;
-
-              const scaledWidth = imgRect.width * widthPercent;
-              const scaledHeight = imgRect.height * heightPercent;
-
-              computedWidth = `${scaledWidth}px`;
-              computedHeight = `${scaledHeight}px`;
-            }
-          } else {
-            // Fallback to using the overlay rect
-            computedLeft = overlayRect.left;
-            computedTop = overlayRect.top;
-          }
-        } else {
-          // No image found, use overlay rect
-          computedLeft = overlayRect.left;
-          computedTop = overlayRect.top;
-        }
-      } else {
-        // Fallback: not OCR layout or no ocr-container found, use overlay rect
-        computedLeft = overlayRect.left;
-        computedTop = overlayRect.top;
+      // Extract rotation from text-overlay element if present
+      let startNode = item.range.startContainer;
+      if (startNode.nodeType === Node.TEXT_NODE) {
+        startNode = startNode.parentElement;
       }
-
-      // Extract rotation from transform style
-      const transform = computedStyle.transform;
-      if (transform && transform !== "none") {
-        // Try to extract rotation from inline style first (more accurate for rotate() values)
-        const inlineStyle = textOverlayElement.style.transform;
-        if (inlineStyle) {
-          const rotateMatch = inlineStyle.match(/rotate\(([-\d.]+)deg\)/);
-          if (rotateMatch) {
-            rotationAngle = parseFloat(rotateMatch[1]);
+      const textOverlayElement = startNode.closest(".text-overlay");
+      if (textOverlayElement) {
+        const computedStyle = window.getComputedStyle(textOverlayElement);
+        const transform = computedStyle.transform;
+        if (transform && transform !== "none") {
+          const inlineStyle = textOverlayElement.style.transform;
+          if (inlineStyle) {
+            const rotateMatch = inlineStyle.match(/rotate\(([-\d.]+)deg\)/);
+            if (rotateMatch) {
+              rotationAngle = parseFloat(rotateMatch[1]);
+            }
           }
         }
       }
     } else {
-      log("No .text-overlay parent found for this range.");
+      log("No OCR layout detected for this range.");
     }
-    // }
 
     // Position the decoration element inside the page container
     function positionElement(

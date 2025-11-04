@@ -244,7 +244,100 @@ export function rectFromLocator(locator) {
   if (!range) {
     return null;
   }
+
+  // Try to get OCR-corrected rect first
+  const ocrRect = getOCRCorrectedRect(range);
+  if (ocrRect) {
+    return toNativeRect(ocrRect);
+  }
+
   return toNativeRect(range.getBoundingClientRect());
+}
+
+/**
+ * Calculates the corrected rect for OCR text-overlay elements.
+ * OCR text overlays use percentage-based positioning relative to the natural image size,
+ * but images may be scaled. This function calculates the correct position on the scaled image.
+ *
+ * @param {Range} range - The DOM range to analyze
+ * @returns {Object|null} A DOMRect-like object with corrected coordinates, or null if not OCR content
+ */
+export function getOCRCorrectedRect(range) {
+  if (!range) {
+    return null;
+  }
+
+  // Get the DOM node from the range
+  let startNode = range.startContainer;
+
+  // If the startNode is a text node, go up to its parent element
+  if (startNode.nodeType === Node.TEXT_NODE) {
+    startNode = startNode.parentElement;
+  }
+
+  // Check if we're in a text-overlay element
+  const textOverlayElement = startNode.closest(".text-overlay");
+  if (!textOverlayElement) {
+    // Not OCR content, return null to use standard rect
+    return null;
+  }
+
+  // Find the parent ocr-container
+  const ocrContainer = textOverlayElement.closest(".ocr-container");
+  if (!ocrContainer) {
+    return null;
+  }
+
+  // Find the image inside the container
+  const img = ocrContainer.querySelector("img");
+  if (!img) {
+    return null;
+  }
+
+  const imgRect = img.getBoundingClientRect();
+
+  // Extract the percentage values from the text-overlay's inline style
+  const styleTop = textOverlayElement.style.top;
+  const styleLeft = textOverlayElement.style.left;
+  const styleWidth = textOverlayElement.style.width;
+  const styleHeight = textOverlayElement.style.height;
+
+  // Parse percentages and calculate actual pixel positions on the SCALED image
+  if (
+    styleTop &&
+    styleLeft &&
+    styleTop.includes("%") &&
+    styleLeft.includes("%") &&
+    styleWidth &&
+    styleHeight &&
+    styleWidth.includes("%") &&
+    styleHeight.includes("%")
+  ) {
+    const topPercent = parseFloat(styleTop) / 100;
+    const leftPercent = parseFloat(styleLeft) / 100;
+    const widthPercent = parseFloat(styleWidth) / 100;
+    const heightPercent = parseFloat(styleHeight) / 100;
+
+    // Calculate position and dimensions on the scaled image
+    const scaledTop = imgRect.top + imgRect.height * topPercent;
+    const scaledLeft = imgRect.left + imgRect.width * leftPercent;
+    const scaledWidth = imgRect.width * widthPercent;
+    const scaledHeight = imgRect.height * heightPercent;
+
+    // Return a DOMRect-like object
+    return {
+      left: scaledLeft,
+      top: scaledTop,
+      right: scaledLeft + scaledWidth,
+      bottom: scaledTop + scaledHeight,
+      width: scaledWidth,
+      height: scaledHeight,
+      x: scaledLeft,
+      y: scaledTop,
+    };
+  }
+
+  return null;
 }
 
 let rectsCache = new LRUCache(10);
@@ -260,8 +353,20 @@ export function clientRectFromLocator(locator, reset, cache) {
   if (!range) {
     return null;
   }
-  const clientRects = getClientRectsNoOverlap(range, true);
-  const rect = clientRects[0];
+
+  // Try to get OCR-corrected rect first
+  const ocrRect = getOCRCorrectedRect(range);
+  let rect;
+
+  if (ocrRect) {
+    // Use OCR-corrected rect
+    rect = ocrRect;
+  } else {
+    // Use standard rect calculation
+    const clientRects = getClientRectsNoOverlap(range, true);
+    rect = clientRects[0];
+  }
+
   nativeRect = toNativeRect(rect);
 
   if (cache === 1) {
