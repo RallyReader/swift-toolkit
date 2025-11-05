@@ -256,8 +256,12 @@ export function rectFromLocator(locator) {
 
 /**
  * Calculates the corrected rect for OCR text-overlay elements.
- * OCR text overlays use percentage-based positioning relative to the natural image size,
- * but images may be scaled. This function calculates the correct position on the scaled image.
+ * OCR text overlays use percentage-based positioning relative to a reference size,
+ * which can be either:
+ * - An image's natural size (if an img element is present and may be scaled)
+ * - The ocr-container's size (if no image, container defines the coordinate space)
+ *
+ * This function calculates the correct position accounting for scaling/sizing differences.
  *
  * @param {Range} range - The DOM range to analyze
  * @returns {Object|null} A DOMRect-like object with corrected coordinates, or null if not OCR content
@@ -288,13 +292,19 @@ export function getOCRCorrectedRect(range) {
     return null;
   }
 
-  // Find the image inside the container
+  // Try to find an image inside the container
   const img = ocrContainer.querySelector("img");
-  if (!img) {
-    return null;
-  }
+  let containerRect;
 
-  const imgRect = img.getBoundingClientRect();
+  if (img) {
+    // If there's an image, use its bounding rect (handles scaled images)
+    containerRect = img.getBoundingClientRect();
+  } else {
+    // If there's no image, use the container's own bounding rect
+    // This handles cases where the OCR text overlays are positioned
+    // relative to a container without an image
+    containerRect = ocrContainer.getBoundingClientRect();
+  }
 
   // Extract the percentage values from the text-overlay's inline style
   const styleTop = textOverlayElement.style.top;
@@ -302,7 +312,7 @@ export function getOCRCorrectedRect(range) {
   const styleWidth = textOverlayElement.style.width;
   const styleHeight = textOverlayElement.style.height;
 
-  // Parse percentages and calculate actual pixel positions on the SCALED image
+  // Parse percentages and calculate actual pixel positions on the container
   if (
     styleTop &&
     styleLeft &&
@@ -318,11 +328,11 @@ export function getOCRCorrectedRect(range) {
     const widthPercent = parseFloat(styleWidth) / 100;
     const heightPercent = parseFloat(styleHeight) / 100;
 
-    // Calculate position and dimensions on the scaled image
-    const scaledTop = imgRect.top + imgRect.height * topPercent;
-    const scaledLeft = imgRect.left + imgRect.width * leftPercent;
-    const scaledWidth = imgRect.width * widthPercent;
-    const scaledHeight = imgRect.height * heightPercent;
+    // Calculate position and dimensions based on the container (image or ocr-container)
+    const scaledTop = containerRect.top + containerRect.height * topPercent;
+    const scaledLeft = containerRect.left + containerRect.width * leftPercent;
+    const scaledWidth = containerRect.width * widthPercent;
+    const scaledHeight = containerRect.height * heightPercent;
 
     // Return a DOMRect-like object
     return {
