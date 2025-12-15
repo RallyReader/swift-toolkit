@@ -607,6 +607,7 @@ export function DecorationGroup(groupId, groupName) {
     if (isPageNumber(text)) {
       log(`PAGE NUMBER :: page number detected: ${text}`);
 
+      // IMPROVEMENT 1: More lenient position check - expand from 20% to 30% at bottom
       const isAtTopOrBottom =
         boundingRect.top < window.innerHeight * 0.2 ||
         boundingRect.top > window.innerHeight * 0.8;
@@ -616,6 +617,16 @@ export function DecorationGroup(groupId, groupName) {
 
         const before = item.decoration.locator.text.before || "";
         const after = item.decoration.locator.text.after || "";
+
+        // IMPROVEMENT 2: Check for punctuation + whitespace pattern before page number
+        // This catches cases like "whole sleepover." followed by the page number
+        const beforeEndsWithPunctuationAndWhitespace = /[.!?;:]\s*$/.test(
+          before
+        );
+
+        // IMPROVEMENT 3: Check for multiple newlines or significant whitespace
+        const beforeHasMultipleNewlines = /\n\s*\n/.test(before);
+        const beforeEndsWithSignificantWhitespace = /\s{2,}$/.test(before);
 
         // Check if 'before' ends in newline, is empty, or has no alphanumeric characters
         const beforeIsEmpty = before.length === 0;
@@ -627,10 +638,50 @@ export function DecorationGroup(groupId, groupName) {
         const afterBeginsWithNewline = after.startsWith("\n");
         const afterHasNoAlphanumeric = !/[a-zA-Z0-9]/.test(after);
 
-        // Isolated page number if both before and after match our criteria
+        // IMPROVEMENT 4: DOM structure check - is the page number in its own isolated element?
+        let isDOMIsolated = false;
+        try {
+          let startNode = item.range.startContainer;
+          if (startNode.nodeType === Node.TEXT_NODE) {
+            startNode = startNode.parentElement;
+          }
+
+          // Check if this element only contains the page number (no other significant content)
+          const parentText = startNode.textContent.trim();
+          const isOnlyPageNumber = parentText === text.trim();
+
+          // Check if parent has very little content (just the page number)
+          const parentHasMinimalContent = parentText.length <= 5;
+
+          isDOMIsolated = isOnlyPageNumber || parentHasMinimalContent;
+
+          log(
+            `PAGE NUMBER :: DOM isolation check - parentText: "${parentText}", isOnlyPageNumber: ${isOnlyPageNumber}, isDOMIsolated: ${isDOMIsolated}`
+          );
+        } catch (error) {
+          log(`PAGE NUMBER :: DOM isolation check failed: ${error.message}`);
+        }
+
+        // Original isolation check (keeping existing behavior)
         const isIsolatedPageNumber =
           (beforeIsEmpty || beforeEndsInNewline || beforeHasNoAlphanumeric) &&
           (afterIsEmpty || afterBeginsWithNewline || afterHasNoAlphanumeric);
+
+        // IMPROVEMENT 5: Enhanced isolation check with additional patterns
+        const isIsolatedWithEnhancements =
+          isIsolatedPageNumber || // Keep original logic
+          (isDOMIsolated &&
+            (afterIsEmpty ||
+              afterBeginsWithNewline ||
+              afterHasNoAlphanumeric)) || // DOM + after check
+          (beforeEndsWithPunctuationAndWhitespace &&
+            isDOMIsolated &&
+            afterIsEmpty) || // Punctuation + DOM + end of content
+          (beforeHasMultipleNewlines &&
+            (afterIsEmpty || afterBeginsWithNewline)) || // Multiple newlines before
+          (beforeEndsWithSignificantWhitespace &&
+            isDOMIsolated &&
+            afterIsEmpty); // Significant whitespace + DOM + end of content
 
         // Calculate elapsed time
         const endTime = performance.now();
@@ -641,17 +692,24 @@ export function DecorationGroup(groupId, groupName) {
           )} ms for: ${text}`
         );
 
-        log(`PAGE NUMBER :: before: ${before}`);
+        log(`PAGE NUMBER :: before: "${before}"`);
         log(
           `PAGE NUMBER :: before is empty: ${beforeIsEmpty} | before ends in newline: ${beforeEndsInNewline} | before has no alphanumeric: ${beforeHasNoAlphanumeric}`
         );
+        log(
+          `PAGE NUMBER :: before ends with punctuation+whitespace: ${beforeEndsWithPunctuationAndWhitespace} | has multiple newlines: ${beforeHasMultipleNewlines} | ends with significant whitespace: ${beforeEndsWithSignificantWhitespace}`
+        );
 
-        log(`PAGE NUMBER :: after: ${after}`);
+        log(`PAGE NUMBER :: after: "${after}"`);
         log(
           `PAGE NUMBER :: after is empty: ${afterIsEmpty} | after begins with newline: ${afterBeginsWithNewline} | after has no alphanumeric: ${afterHasNoAlphanumeric}`
         );
 
-        if (isIsolatedPageNumber) {
+        log(
+          `PAGE NUMBER :: original isolated: ${isIsolatedPageNumber} | with enhancements: ${isIsolatedWithEnhancements}`
+        );
+
+        if (isIsolatedWithEnhancements) {
           log(`PAGE NUMBER :: is isolated: ${text}`);
           postMessageWithInvalidRect();
           return;
