@@ -105,14 +105,17 @@ final class EPUBMetadataParser: Loggable {
 
         func displayOption(_ name: String) -> String? {
             // https://readium.org/architecture/streamer/parser/metadata#epub-2x-10
-            guard let platform = displayOptions?.firstChild(xpath: "platform[@name='*']")
-                ?? displayOptions?.firstChild(xpath: "platform[@name='ipad']")
-                ?? displayOptions?.firstChild(xpath: "platform[@name='iphone']")
-                ?? displayOptions?.firstChild(xpath: "platform")
+            // The iBooks / Kobo display options files are often XHTML documents with a default XML namespace
+            // (eg. xmlns="http://www.w3.org/1999/xhtml"). Fuzi XPath queries without a namespace prefix won't
+            // match those nodes, so we use `local-name()` to be namespace-agnostic.
+            guard let platform = displayOptions?.firstChild(xpath: "//*[local-name()='platform' and @name='*']")
+                ?? displayOptions?.firstChild(xpath: "//*[local-name()='platform' and @name='ipad']")
+                ?? displayOptions?.firstChild(xpath: "//*[local-name()='platform' and @name='iphone']")
+                ?? displayOptions?.firstChild(xpath: "//*[local-name()='platform']")
             else {
                 return nil
             }
-            return platform.firstChild(xpath: "option[@name='\(name)']")?.stringValue
+            return platform.firstChild(xpath: "*[local-name()='option' and @name='\(name)']")?.stringValue
         }
 
         return Presentation(
