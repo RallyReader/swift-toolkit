@@ -1001,6 +1001,51 @@ export function getLastVisibleWordText() {
   return null; // Return null if no visible word is found
 }
 
+// Returns the last word in the whole document (not just the visible viewport).
+// The returned object matches the same structure as getLastVisibleWordText():
+// { text: LocatorText } where LocatorText comes from getTextFrom().
+export function getLastWordText() {
+  const root = document.body || document.documentElement || document;
+  if (!root) {
+    return null;
+  }
+  const nodeIterator = document.createNodeIterator(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: function (node) {
+      // Only accept text nodes that are not empty
+      if (node.nodeValue.trim().length > 0) {
+        return NodeFilter.FILTER_ACCEPT;
+      }
+      return NodeFilter.FILTER_REJECT;
+    },
+  });
+
+  // Convert the iterator to an array and reverse it to iterate from the end
+  const textNodes = [];
+  let documentNode;
+  while ((documentNode = nodeIterator.nextNode())) {
+    textNodes.push(documentNode);
+  }
+
+  for (let i = textNodes.length - 1; i >= 0; i--) {
+    const documentNode = textNodes[i];
+    const words = documentNode.nodeValue.trim().split(/\s+/);
+    if (words.length > 0) {
+      // Loop through each word in reverse to find the last visible word within the viewport
+      for (let j = words.length - 1; j >= 0; j--) {
+        const wordIndex = documentNode.nodeValue.lastIndexOf(words[j]);
+
+        // Create a range for each word
+        const wordRange = document.createRange();
+        wordRange.setStart(documentNode, wordIndex);
+        wordRange.setEnd(documentNode, wordIndex + words[j].length);
+        return { text: getTextFrom(words[j], wordRange) };
+      }
+    }
+  }
+
+  return null; // Return null if no word is found
+}
+
 export function hasOCRContainer() {
   // This selects the first div element with class "ocr-container"
   return document.querySelector("div.ocr-container") !== null;

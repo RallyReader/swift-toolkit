@@ -23,6 +23,7 @@ import {
   calculateHorizontalPageRanges,
   getFirstVisibleWordText,
   getLastVisibleWordText,
+  getLastWordText,
   hasOCRContainer,
   getHtmlBodyTextContent,
 } from "./utils";
@@ -44,6 +45,7 @@ global.readium = {
   calculateHorizontalPageRanges: calculateHorizontalPageRanges,
   getFirstVisibleWordText: getFirstVisibleWordText,
   getLastVisibleWordText: getLastVisibleWordText,
+  getLastWordText: getLastWordText,
   hasOCRContainer: hasOCRContainer,
   getHtmlBodyTextContent: getHtmlBodyTextContent,
   // decoration

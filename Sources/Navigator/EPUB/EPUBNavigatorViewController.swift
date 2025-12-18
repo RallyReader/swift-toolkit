@@ -896,6 +896,29 @@ open class EPUBNavigatorViewController: UIViewController,
         }
     }
     
+    public func getLastWordLocatorFromHref(_ href: String, completion: @escaping (Locator?) -> Void) {
+        if let spreadView = loadedSpreadView(forHREF: href) {
+            let script = "readium.getLastWordText()"
+            spreadView.evaluateScript(script, inHREF: href, completion: { result in
+                do {
+                    let readiumResult = try result.get()
+                    if let selection = readiumResult as? [String: Any],
+                       let text = try? Locator.Text(json: selection["text"]) {
+                        let locator = Locator(href: href, type: "text/html", text: text)
+                        completion(locator)
+                    } else {
+                        completion(nil)
+                    }
+                } catch {
+                    self.log(.error, error)
+                    completion(nil)
+                }
+            })
+        } else {
+            completion(nil)
+        }
+    }
+    
     public func getHtmlBodyTextContent(href: String, completion: @escaping (String?) -> Void) {
         if let spreadView = loadedSpreadView(forHREF: href) {
             let script = "readium.getHtmlBodyTextContent()"
