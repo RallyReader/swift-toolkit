@@ -1016,7 +1016,7 @@ open class EPUBNavigatorViewController: UIViewController,
                 guard let script = changes.javascript(forGroup: group, styles: config.decorationTemplates) else {
                     continue
                 }
-                print("decorations script: \(script)")
+                
                 let loadedSpread = loadedSpreadView(forHREF: href)
                 if let loadedSpread = loadedSpread {
                     loadedSpread.evaluateScript(script, inHREF: href) { result in
@@ -1056,7 +1056,7 @@ open class EPUBNavigatorViewController: UIViewController,
              guard let script = changes.javascript(forGroup: group, styles: config.decorationTemplates) else {
                  continue
              }
-             print("decorations script: \(script)")
+             
              let loadedSpread = loadedSpreadView(forHREF: href)
              if let loadedSpread = loadedSpread {
                  loadedSpread.evaluateScript(script, inHREF: href) { result in
