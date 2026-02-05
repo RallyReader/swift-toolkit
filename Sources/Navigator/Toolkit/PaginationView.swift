@@ -60,6 +60,12 @@ protocol PaginationViewDelegate: AnyObject {
 
     /// Returns the number of positions (as in `Publication.positionList`) in the page view at given index.
     func paginationView(_ paginationView: PaginationView, positionCountAtIndex index: Int) -> Int
+    
+    /// Called when the user will begin dragging the scroll view
+    func paginationViewScrollViewWillBeginDragging(_ paginationView: PaginationView)
+    
+    /// Called when the scroll view did end decelerating
+    func paginationViewScrollViewDidEndDecelerating(_ paginationView: PaginationView)
 }
 
 final class PaginationView: UIView, Loggable {
@@ -377,6 +383,11 @@ extension PaginationView: UIScrollViewDelegate {
         }
     }
 
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        // we need to stop listening
+        delegate?.paginationViewScrollViewWillBeginDragging(self)
+    }
+    
     public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
         scrollView.isScrollEnabled = true
 
@@ -387,5 +398,7 @@ extension PaginationView: UIScrollViewDelegate {
         let newIndex = Int(round(currentOffset / scrollView.frame.width))
 
         setCurrentIndex(newIndex)
+        
+        delegate?.paginationViewScrollViewDidEndDecelerating(self)
     }
 }

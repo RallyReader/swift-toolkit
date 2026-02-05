@@ -17,6 +17,11 @@ public protocol EPUBNavigatorDelegate: VisualNavigatorDelegate, SelectableNaviga
 
     func spreadViewDidLoad(href: String)
     
+    // MARK: - Scroll Events
+    
+    func navigatorScrollViewWillBeginDragging(_ navigator: EPUBNavigatorViewController)
+    func navigatorScrollViewDidEndDecelerating(_ navigator: EPUBNavigatorViewController)
+    
     // MARK: - Deprecated
 
     // Implement `NavigatorDelegate.navigator(didTapAt:)` instead.
@@ -33,6 +38,9 @@ public protocol EPUBNavigatorDelegate: VisualNavigatorDelegate, SelectableNaviga
 
 public extension EPUBNavigatorDelegate {
     func navigator(_ navigator: EPUBNavigatorViewController, setupUserScripts userContentController: WKUserContentController) {}
+
+    func navigatorScrollViewWillBeginDragging(_ navigator: EPUBNavigatorViewController) {}
+    func navigatorScrollViewDidEndDecelerating(_ navigator: EPUBNavigatorViewController) {}
 
     func middleTapHandler() {}
     func willExitPublication(documentIndex: Int, progression: Double?) {}
@@ -1439,6 +1447,14 @@ extension EPUBNavigatorViewController: EPUBSpreadViewDelegate {
     func spreadViewDidTerminate() {
         reloadSpreads(force: true)
     }
+    
+    func spreadViewScrollViewWillBeginDragging(_ spreadView: EPUBSpreadView) {
+        delegate?.navigatorScrollViewWillBeginDragging(self)
+    }
+    
+    func spreadViewScrollViewDidEndDecelerating(_ spreadView: EPUBSpreadView) {
+        delegate?.navigatorScrollViewDidEndDecelerating(self)
+    }
 }
 
 extension EPUBNavigatorViewController: EditingActionsControllerDelegate {
@@ -1488,5 +1504,13 @@ extension EPUBNavigatorViewController: PaginationViewDelegate {
 
     func paginationView(_ paginationView: PaginationView, positionCountAtIndex index: Int) -> Int {
         spreads[index].positionCount(in: readingOrder, positionsByReadingOrder: positionsByReadingOrder)
+    }
+    
+    func paginationViewScrollViewWillBeginDragging(_ paginationView: PaginationView) {
+        delegate?.navigatorScrollViewWillBeginDragging(self)
+    }
+    
+    func paginationViewScrollViewDidEndDecelerating(_ paginationView: PaginationView) {
+        delegate?.navigatorScrollViewDidEndDecelerating(self)
     }
 }

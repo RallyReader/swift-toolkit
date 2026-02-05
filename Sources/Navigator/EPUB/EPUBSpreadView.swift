@@ -44,6 +44,12 @@ protocol EPUBSpreadViewDelegate: AnyObject {
 
     /// Called when WKWebview terminates
     func spreadViewDidTerminate()
+    
+    /// Called when the user will begin dragging the scroll view
+    func spreadViewScrollViewWillBeginDragging(_ spreadView: EPUBSpreadView)
+    
+    /// Called when the scroll view did end decelerating
+    func spreadViewScrollViewDidEndDecelerating(_ spreadView: EPUBSpreadView)
 }
 
 class EPUBSpreadView: UIView, Loggable, PageView {
@@ -534,6 +540,11 @@ extension EPUBSpreadView: UIScrollViewDelegate {
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
         webView.clearSelection()
+        delegate?.spreadViewScrollViewWillBeginDragging(self)
+    }
+    
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        delegate?.spreadViewScrollViewDidEndDecelerating(self)
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
