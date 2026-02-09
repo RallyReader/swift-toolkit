@@ -637,6 +637,8 @@ export function DecorationGroup(groupId, groupName) {
         const afterIsEmpty = after.length === 0;
         const afterBeginsWithNewline = after.startsWith("\n");
         const afterHasNoAlphanumeric = !/[a-zA-Z0-9]/.test(after);
+        // IMPROVEMENT 6: Check if 'after' begins with significant whitespace (space added by processSpansForTextSpacing)
+        const afterBeginsWithWhitespace = /^\s/.test(after);
 
         // IMPROVEMENT 4: DOM structure check - is the page number in its own isolated element?
         let isDOMIsolated = false;
@@ -665,7 +667,10 @@ export function DecorationGroup(groupId, groupName) {
         // Original isolation check (keeping existing behavior)
         const isIsolatedPageNumber =
           (beforeIsEmpty || beforeEndsInNewline || beforeHasNoAlphanumeric) &&
-          (afterIsEmpty || afterBeginsWithNewline || afterHasNoAlphanumeric);
+          (afterIsEmpty ||
+            afterBeginsWithNewline ||
+            afterHasNoAlphanumeric ||
+            afterBeginsWithWhitespace);
 
         // IMPROVEMENT 5: Enhanced isolation check with additional patterns
         const isIsolatedWithEnhancements =
@@ -673,12 +678,15 @@ export function DecorationGroup(groupId, groupName) {
           (isDOMIsolated &&
             (afterIsEmpty ||
               afterBeginsWithNewline ||
-              afterHasNoAlphanumeric)) || // DOM + after check
+              afterHasNoAlphanumeric ||
+              afterBeginsWithWhitespace)) || // DOM + after check
           (beforeEndsWithPunctuationAndWhitespace &&
             isDOMIsolated &&
             afterIsEmpty) || // Punctuation + DOM + end of content
           (beforeHasMultipleNewlines &&
-            (afterIsEmpty || afterBeginsWithNewline)) || // Multiple newlines before
+            (afterIsEmpty ||
+              afterBeginsWithNewline ||
+              afterBeginsWithWhitespace)) || // Multiple newlines before
           (beforeEndsWithSignificantWhitespace &&
             isDOMIsolated &&
             afterIsEmpty); // Significant whitespace + DOM + end of content
@@ -702,7 +710,7 @@ export function DecorationGroup(groupId, groupName) {
 
         log(`PAGE NUMBER :: after: "${after}"`);
         log(
-          `PAGE NUMBER :: after is empty: ${afterIsEmpty} | after begins with newline: ${afterBeginsWithNewline} | after has no alphanumeric: ${afterHasNoAlphanumeric}`
+          `PAGE NUMBER :: after is empty: ${afterIsEmpty} | after begins with newline: ${afterBeginsWithNewline} | after has no alphanumeric: ${afterHasNoAlphanumeric} | after begins with whitespace: ${afterBeginsWithWhitespace}`
         );
 
         log(
