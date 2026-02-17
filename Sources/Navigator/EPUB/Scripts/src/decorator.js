@@ -628,6 +628,17 @@ export function DecorationGroup(groupId, groupName) {
         const beforeHasMultipleNewlines = /\n\s*\n/.test(before);
         const beforeEndsWithSignificantWhitespace = /\s{2,}$/.test(before);
 
+        // NEW IMPROVEMENT: Check what comes immediately before the number (after the last newline)
+        // If it's a word like "Chapter", "Section", "Part", etc., it's not a page number
+        const lastNewlineIndex = before.lastIndexOf("\n");
+        const immediateTextBefore =
+          lastNewlineIndex !== -1
+            ? before.substring(lastNewlineIndex + 1)
+            : before;
+        const beforeEndsWithWordAndSpace = /[a-zA-Z]\s+$/.test(
+          immediateTextBefore
+        );
+
         // Check if 'before' ends in newline, is empty, or has no alphanumeric characters
         const beforeIsEmpty = before.length === 0;
         const beforeEndsInNewline = before.endsWith("\n");
@@ -673,23 +684,25 @@ export function DecorationGroup(groupId, groupName) {
             afterBeginsWithWhitespace);
 
         // IMPROVEMENT 5: Enhanced isolation check with additional patterns
+        // CRITICAL: Exclude numbers that immediately follow words (like "Chapter 1")
         const isIsolatedWithEnhancements =
-          isIsolatedPageNumber || // Keep original logic
-          (isDOMIsolated &&
-            (afterIsEmpty ||
-              afterBeginsWithNewline ||
-              afterHasNoAlphanumeric ||
-              afterBeginsWithWhitespace)) || // DOM + after check
-          (beforeEndsWithPunctuationAndWhitespace &&
-            isDOMIsolated &&
-            afterIsEmpty) || // Punctuation + DOM + end of content
-          (beforeHasMultipleNewlines &&
-            (afterIsEmpty ||
-              afterBeginsWithNewline ||
-              afterBeginsWithWhitespace)) || // Multiple newlines before
-          (beforeEndsWithSignificantWhitespace &&
-            isDOMIsolated &&
-            afterIsEmpty); // Significant whitespace + DOM + end of content
+          !beforeEndsWithWordAndSpace && // NEW: Exclude if preceded by word like "Chapter "
+          (isIsolatedPageNumber || // Keep original logic
+            (isDOMIsolated &&
+              (afterIsEmpty ||
+                afterBeginsWithNewline ||
+                afterHasNoAlphanumeric ||
+                afterBeginsWithWhitespace)) || // DOM + after check
+            (beforeEndsWithPunctuationAndWhitespace &&
+              isDOMIsolated &&
+              afterIsEmpty) || // Punctuation + DOM + end of content
+            (beforeHasMultipleNewlines &&
+              (afterIsEmpty ||
+                afterBeginsWithNewline ||
+                afterBeginsWithWhitespace)) || // Multiple newlines before
+            (beforeEndsWithSignificantWhitespace &&
+              isDOMIsolated &&
+              afterIsEmpty)); // Significant whitespace + DOM + end of content
 
         // Calculate elapsed time
         const endTime = performance.now();
@@ -706,6 +719,9 @@ export function DecorationGroup(groupId, groupName) {
         );
         log(
           `PAGE NUMBER :: before ends with punctuation+whitespace: ${beforeEndsWithPunctuationAndWhitespace} | has multiple newlines: ${beforeHasMultipleNewlines} | ends with significant whitespace: ${beforeEndsWithSignificantWhitespace}`
+        );
+        log(
+          `PAGE NUMBER :: immediate text before: "${immediateTextBefore}" | ends with word+space: ${beforeEndsWithWordAndSpace}`
         );
 
         log(`PAGE NUMBER :: after: "${after}"`);
