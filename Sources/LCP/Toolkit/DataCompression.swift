@@ -457,7 +457,9 @@ private func perform(_ config: Config, source: UnsafePointer<UInt8>, sourceSize:
         switch compression_stream_process(&stream, flags) {
         case COMPRESSION_STATUS_OK:
             guard stream.dst_size == 0 else { return nil }
-            result.append(buffer, count: stream.dst_ptr - buffer)
+            let producedCount = bufferSize - stream.dst_size
+            guard producedCount > 0 else { return nil }
+            result.append(buffer, count: producedCount)
             stream.dst_ptr = buffer
             stream.dst_size = bufferSize
 
@@ -466,7 +468,10 @@ private func perform(_ config: Config, source: UnsafePointer<UInt8>, sourceSize:
             }
 
         case COMPRESSION_STATUS_END:
-            result.append(buffer, count: stream.dst_ptr - buffer)
+            let producedCount = bufferSize - stream.dst_size
+            if producedCount > 0 {
+                result.append(buffer, count: producedCount)
+            }
             return result
 
         default:
