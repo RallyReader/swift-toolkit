@@ -23,6 +23,9 @@ protocol EPUBSpreadViewDelegate: AnyObject {
 
     /// Called when the user tapped on a decoration.
     func spreadView(_ spreadView: EPUBSpreadView, didActivateDecoration id: Decoration.Id, inGroup group: String, frame: CGRect?, point: CGPoint?)
+    
+    /// Called when a decoration rect is calculated
+    func spreadView(_ spreadView: EPUBSpreadView, didCalculateDecorationRect id: Decoration.Id, inGroup group: String, frame: CGRect?, ocrLayout: Bool)
 
     /// Called when the text selection changes.
     func spreadView(_ spreadView: EPUBSpreadView, selectionDidChange text: Locator.Text?, frame: CGRect)
@@ -41,6 +44,12 @@ protocol EPUBSpreadViewDelegate: AnyObject {
 
     /// Called when WKWebview terminates
     func spreadViewDidTerminate()
+    
+    /// Called when the user will begin dragging the scroll view
+    func spreadViewScrollViewWillBeginDragging(_ spreadView: EPUBSpreadView)
+    
+    /// Called when the scroll view did end decelerating
+    func spreadViewScrollViewDidEndDecelerating(_ spreadView: EPUBSpreadView)
 }
 
 class EPUBSpreadView: UIView, Loggable, PageView {
@@ -364,6 +373,30 @@ class EPUBSpreadView: UIView, Loggable, PageView {
         frame.origin = convertPointToNavigatorSpace(frame.origin)
         delegate?.spreadView(self, selectionDidChange: text, frame: frame)
     }
+    
+    private func selectionRectDidChange(_ body: Any) {
+        if body is NSNull {
+            focusedResource = nil
+            delegate?.spreadView(self, selectionDidChange: nil, frame: .zero)
+            return
+        }
+
+        guard
+            let selection = body as? [String: Any],
+            let href = selection["href"] as? String,
+            let text = try? Locator.Text(json: selection["text"]),
+            var frame = CGRect(json: selection["rect"])
+        else {
+            focusedResource = nil
+            delegate?.spreadView(self, selectionDidChange: nil, frame: .zero)
+            log(.warning, "Invalid body for selectionDidChange: \(body)")
+            return
+        }
+
+        focusedResource = spread.links.first(withHREF: href)
+        frame.origin = convertPointToNavigatorSpace(frame.origin)
+        delegate?.spreadView(self, selectionDidChange: text, frame: frame)
+    }
 
     /// Update webview style to userSettings.
     /// To override in subclasses.
@@ -446,7 +479,9 @@ class EPUBSpreadView: UIView, Loggable, PageView {
         registerJSMessage(named: "spreadLoadStarted") { [weak self] in self?.spreadLoadDidStart($0) }
         registerJSMessage(named: "spreadLoaded") { [weak self] in self?.spreadDidLoad($0) }
         registerJSMessage(named: "selectionChanged") { [weak self] in self?.selectionDidChange($0) }
+        registerJSMessage(named: "selectionRectChanged") { [weak self] in self?.selectionRectDidChange($0) }
         registerJSMessage(named: "decorationActivated") { [weak self] in self?.decorationDidActivate($0) }
+        registerJSMessage(named: "decorationRect") { [weak self] in self?.decorationRect($0) }
         registerJSMessage(named: "keyEventReceived") { [weak self] in self?.didReceiveKeyEvent($0) }
     }
 
@@ -501,6 +536,23 @@ class EPUBSpreadView: UIView, Loggable, PageView {
         let point = ClickEvent(json: decoration["click"])
             .map { convertPointToNavigatorSpace($0.point) }
         delegate?.spreadView(self, didActivateDecoration: decorationId, inGroup: groupName, frame: frame, point: point)
+    }
+    
+    /// Called by the JavaScript layer when the user activates a decoration.
+    private func decorationRect(_ body: Any) {
+        guard
+            let decoration = body as? [String: Any],
+            let decorationId = decoration["id"] as? Decoration.Id,
+            let groupName = decoration["group"] as? String,
+            var frame = CGRect(json: decoration["rect"])
+        else {
+            log(.warning, "Invalid body for decorationDidActivate: \(body)")
+            return
+        }
+
+        frame = convertRectToNavigatorSpace(frame)
+        let ocrLayout = decoration["ocrLayout"] as? Bool ?? false
+        delegate?.spreadView(self, didCalculateDecorationRect: decorationId, inGroup: groupName, frame: frame, ocrLayout: ocrLayout)
     }
 
     // MARK: - Accessibility
@@ -577,6 +629,11 @@ extension EPUBSpreadView: UIScrollViewDelegate {
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
         webView.clearSelection()
+        delegate?.spreadViewScrollViewWillBeginDragging(self)
+    }
+    
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        delegate?.spreadViewScrollViewDidEndDecelerating(self)
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {

@@ -18,12 +18,20 @@ import WebKit
     // MARK: - WebView Customization
 
     func navigator(_ navigator: EPUBNavigatorViewController, setupUserScripts userContentController: WKUserContentController)
+
+    func spreadViewDidLoad(href: String)
+
+    func navigatorScrollViewWillBeginDragging(_ navigator: EPUBNavigatorViewController)
+    func navigatorScrollViewDidEndDecelerating(_ navigator: EPUBNavigatorViewController)
 }
 
 public extension EPUBNavigatorDelegate {
     func navigator(_ navigator: EPUBNavigatorViewController, viewportDidChange viewport: EPUBNavigatorViewController.Viewport?) {}
 
     func navigator(_ navigator: EPUBNavigatorViewController, setupUserScripts userContentController: WKUserContentController) {}
+    func spreadViewDidLoad(href: String) {}
+    func navigatorScrollViewWillBeginDragging(_ navigator: EPUBNavigatorViewController) {}
+    func navigatorScrollViewDidEndDecelerating(_ navigator: EPUBNavigatorViewController) {}
 }
 
 public typealias EPUBContentInsets = (top: CGFloat, bottom: CGFloat)
@@ -791,6 +799,170 @@ open class EPUBNavigatorViewController: InputObservableViewController,
         return await go(to: direction, options: options)
     }
 
+    public func getRectFromLocator(_ locator: Locator, convertRect: Bool = true, reset: Bool = false, cache: Bool = true, completion: @escaping (CGRect?) -> Void) {
+        guard let locatorJson = locator.jsonString else {
+            completion(nil)
+            return
+        }
+
+        let spreadView = loadedSpreadViewForHREF(locator.href)
+        let script = "readium.clientRectFromLocator(\(locatorJson), \(reset ? 1 : 0), \(cache ? 1 : 0))"
+        Task {
+            let result = await spreadView?.evaluateScript(script, inHREF: locator.href)
+            await MainActor.run {
+                switch result {
+                case .success(let readiumResult):
+                    if let frame = CGRect(json: readiumResult) {
+                        if convertRect {
+                            let finalFrame = spreadView?.convertRectToNavigatorSpace(frame)
+                            completion(finalFrame)
+                        } else {
+                            completion(frame)
+                        }
+                    } else {
+                        completion(nil)
+                    }
+                case .failure(let error):
+                    self.log(.error, error)
+                    completion(nil)
+                case .none:
+                    completion(nil)
+                }
+            }
+        }
+    }
+
+    public func getPageRanges<T: URLConvertible>(_ href: T, completion: @escaping ([String]) -> Void) {
+        if let spreadView = loadedSpreadViewForHREF(href) {
+            let script = "readium.calculateHorizontalPageRanges()"
+            Task {
+                let result = await spreadView.evaluateScript(script, inHREF: href)
+                var pages = [String]()
+                if case .success(let readiumResult) = result,
+                   let json = readiumResult as? [String: String] {
+                    let keys = json.keys.sorted(by: { Int($0) ?? 0 < Int($1) ?? 0 })
+                    for key in keys {
+                        if let value = json[key] {
+                            pages.append(value)
+                        }
+                    }
+                }
+                await MainActor.run { completion(pages) }
+            }
+        } else {
+            completion([])
+        }
+    }
+
+    public func getFirstWordLocatorFromVisiblePage<T: URLConvertible>(href: T, completion: @escaping (Locator?) -> Void) {
+        if let spreadView = loadedSpreadViewForHREF(href) {
+            let script = "readium.getFirstVisibleWordText()"
+            Task {
+                let result = await spreadView.evaluateScript(script, inHREF: href)
+                await MainActor.run {
+                    if case .success(let readiumResult) = result,
+                       let selection = readiumResult as? [String: Any],
+                       let text = try? Locator.Text(json: selection["text"]) {
+                        let locator = Locator(href: href, mediaType: .html, text: text)
+                        completion(locator)
+                    } else {
+                        completion(nil)
+                    }
+                }
+            }
+        } else {
+            completion(nil)
+        }
+    }
+
+    public func getLastWordLocatorFromVisiblePage<T: URLConvertible>(href: T, completion: @escaping (Locator?) -> Void) {
+        if let spreadView = loadedSpreadViewForHREF(href) {
+            let script = "readium.getLastVisibleWordText()"
+            Task {
+                let result = await spreadView.evaluateScript(script, inHREF: href)
+                await MainActor.run {
+                    if case .success(let readiumResult) = result,
+                       let selection = readiumResult as? [String: Any],
+                       let text = try? Locator.Text(json: selection["text"]) {
+                        let locator = Locator(href: href, mediaType: .html, text: text)
+                        completion(locator)
+                    } else {
+                        completion(nil)
+                    }
+                }
+            }
+        } else {
+            completion(nil)
+        }
+    }
+
+    public func getLastWordLocatorFromHref<T: URLConvertible>(_ href: T, completion: @escaping (Locator?) -> Void) {
+        if let spreadView = loadedSpreadViewForHREF(href) {
+            let script = "readium.getLastWordText()"
+            Task {
+                let result = await spreadView.evaluateScript(script, inHREF: href)
+                await MainActor.run {
+                    if case .success(let readiumResult) = result,
+                       let selection = readiumResult as? [String: Any],
+                       let text = try? Locator.Text(json: selection["text"]) {
+                        let locator = Locator(href: href, mediaType: .html, text: text)
+                        completion(locator)
+                    } else {
+                        completion(nil)
+                    }
+                }
+            }
+        } else {
+            completion(nil)
+        }
+    }
+
+    public func getHtmlBodyTextContent<T: URLConvertible>(href: T, completion: @escaping (String?) -> Void) {
+        if let spreadView = loadedSpreadViewForHREF(href) {
+            let script = "readium.getHtmlBodyTextContent()"
+            Task {
+                let result = await spreadView.evaluateScript(script, inHREF: href)
+                await MainActor.run {
+                    if case .success(let readiumResult) = result {
+                        completion(readiumResult as? String)
+                    } else {
+                        completion(nil)
+                    }
+                }
+            }
+        } else {
+            completion(nil)
+        }
+    }
+
+    public func spreadHasFixedLayout<T: URLConvertible>(href: T) -> Bool? {
+        if let spreadView = loadedSpreadViewForHREF(href) {
+            return spreadView.spread.layout == .fixed
+        }
+        return nil
+    }
+
+    public func currentSpreadDisplayingLastPage() -> Bool {
+        if let spreadView = paginationView?.loadedViews[paginationView!.currentIndex] as? EPUBSpreadView {
+            let offset = spreadView.scrollView.contentOffset.x
+            let contentWidth = spreadView.scrollView.contentSize.width
+            let pageWidth = spreadView.scrollView.bounds.width
+            return offset + pageWidth >= contentWidth
+        }
+        return false
+    }
+    
+    public func scrollViewInsideSpreadView(forHREF href: String) -> UIScrollView? {
+        let spreadView = loadedSpreadView(forHREF: href)
+        return spreadView?.scrollView
+    }
+    
+    public func allLoadedScrollViews() -> [UIScrollView] {
+        return paginationView.loadedViews.compactMap { _, view in
+            (view as? EPUBSpreadView)?.scrollView
+        }
+    }
+
     // MARK: - SelectableNavigator
 
     public var currentSelection: Selection? {
@@ -813,12 +985,14 @@ open class EPUBNavigatorViewController: InputObservableViewController,
 
     /// Decoration group callbacks, indexed by the group name.
     private var decorationCallbacks: [String: [DecorableNavigator.OnActivatedCallback]] = [:]
+    
+    private var decorationRectsCallbacks: [String: [DecorableNavigator.OnRectCalculatedCallback]] = [:]
 
     public func supports(decorationStyle style: Decoration.Style.Id) -> Bool {
         config.decorationTemplates.keys.contains(style)
     }
 
-    public func apply(decorations: [Decoration], in group: String) {
+    public func apply(decorations: [Decoration], enhanced: Bool = false, in group: String) {
         Task {
             await initialized()
 
@@ -837,17 +1011,15 @@ open class EPUBNavigatorViewController: InputObservableViewController,
 
                 if decorations.isEmpty {
                     for (_, pageView) in paginationView.loadedViews {
+                        let clearScript = enhanced
+                            ? "requestAnimationFrame(function () { readium.getDecorations('\(group)').clearAllEnhanced(); });"
+                            : "requestAnimationFrame(function () { readium.getDecorations('\(group)').clear(); });"
                         tasks.addTask {
-                            await (pageView as? EPUBSpreadView)?.evaluateScript(
-                                // The updates command are using `requestAnimationFrame()`, so we need it for
-                                // `clear()` as well otherwise we might recreate a highlight after it has been
-                                // cleared.
-                                "requestAnimationFrame(function () { readium.getDecorations('\(group)').clear(); });"
-                            )
+                            await (pageView as? EPUBSpreadView)?.evaluateScript(clearScript)
                         }
                     }
                 } else {
-                    for (href, changes) in target.changesByHREF(from: source) {
+                    for (href, changes) in target.changesByHREF(from: source, enhanced: enhanced) {
                         guard let script = changes.javascript(forGroup: group, styles: config.decorationTemplates) else {
                             continue
                         }
@@ -863,6 +1035,34 @@ open class EPUBNavigatorViewController: InputObservableViewController,
                     }
                 }
             }
+        }
+    }
+
+    public func remove(decoration: Decoration, in group: String) {
+        var decorationsInGroup = self.decorations[group]
+        decorationsInGroup?.removeAll(where: { $0.decoration.id == decoration.id })
+        self.decorations[group] = decorationsInGroup
+
+        let script = "requestAnimationFrame(function () { readium.getDecorations('\(group)').clearEnhanced('\(decoration.id)'); });"
+        Task {
+            await self.loadedSpreadViewForHREF(decoration.locator.href)?.evaluateScript(script)
+        }
+    }
+
+    public func addDecorations(decorations: [Decoration], enhanced: Bool, in group: String, completion: @escaping () -> Void) {
+        let target = decorations.map { DiffableDecoration(decoration: $0) }
+        self.decorations[group]?.append(contentsOf: target)
+
+        Task {
+            for (href, changes) in target.changesByHREF(from: [], enhanced: enhanced) {
+                guard let script = changes.javascript(forGroup: group, styles: config.decorationTemplates) else {
+                    continue
+                }
+                if let spreadView = loadedSpreadViewForHREF(href), spreadView.isSpreadLoaded {
+                    await spreadView.evaluateScript(script, inHREF: href)
+                }
+            }
+            await MainActor.run { completion() }
         }
     }
 
@@ -885,6 +1085,19 @@ open class EPUBNavigatorViewController: InputObservableViewController,
                     }
                 }
             }
+        }
+    }
+    
+    public func observeDecorationRectCalculations(inGroup group: String, onActivated: OnRectCalculatedCallback?) {
+        guard let onActivated = onActivated else {
+            return
+        }
+        var callbacks = decorationRectsCallbacks[group] ?? []
+        callbacks.append(onActivated)
+        decorationRectsCallbacks[group] = callbacks
+
+        for (_, view) in paginationView.loadedViews {
+            (view as? EPUBSpreadView)?.evaluateScript("readium.getDecorations('\(group)').setActivable();")
         }
     }
 
@@ -1064,13 +1277,14 @@ extension EPUBNavigatorViewController: EPUBSpreadViewDelegate {
             for (group, decorations) in decorations {
                 let decorations = decorations
                     .filter { $0.decoration.locator.href.isEquivalentTo(href) }
-                    .map { DecorationChange.add($0.decoration) }
+                    .map { ($0.decoration.userInfo["enhancedLayout"] as? Bool) == true ? DecorationChange.addEnhanced($0.decoration) : DecorationChange.add($0.decoration) }
 
                 guard let decorationsScript = decorations.javascript(forGroup: group, styles: config.decorationTemplates) else {
                     continue
                 }
                 script += decorationsScript
             }
+            delegate?.spreadViewDidLoad(href: href.string)
         }
 
         await spreadView.evaluateScript("(function() {\n\(script)\n})();")
@@ -1200,6 +1414,18 @@ extension EPUBNavigatorViewController: EPUBSpreadViewDelegate {
             callback(OnDecorationActivatedEvent(decoration: decoration, group: group, rect: frame, point: point))
         }
     }
+    
+    func spreadView(_ spreadView: EPUBSpreadView, didCalculateDecorationRect id: Decoration.Id, inGroup group: String, frame: CGRect?, ocrLayout: Bool) {
+        guard
+            let callbacks = decorationRectsCallbacks[group].takeIf({ !$0.isEmpty })
+        else {
+            return
+        }
+
+        for callback in callbacks {
+            callback(OnDecorationRectEvent(decorationId: id, group: group, rect: frame, ocrLayout: ocrLayout))
+        }
+    }
 
     func spreadView(_ spreadView: EPUBSpreadView, selectionDidChange text: Locator.Text?, frame: CGRect) {
         guard
@@ -1227,6 +1453,14 @@ extension EPUBNavigatorViewController: EPUBSpreadViewDelegate {
 
     func spreadViewDidTerminate() {
         reloadSpreads()
+    }
+    
+    func spreadViewScrollViewWillBeginDragging(_ spreadView: EPUBSpreadView) {
+        delegate?.navigatorScrollViewWillBeginDragging(self)
+    }
+    
+    func spreadViewScrollViewDidEndDecelerating(_ spreadView: EPUBSpreadView) {
+        delegate?.navigatorScrollViewDidEndDecelerating(self)
     }
 }
 
@@ -1271,5 +1505,13 @@ extension EPUBNavigatorViewController: PaginationViewDelegate {
 
     func paginationView(_ paginationView: PaginationView, positionCountAtIndex index: Int) -> Int {
         spreads[index].positionCount(in: readingOrder, positionsByReadingOrder: positionsByReadingOrder)
+    }
+    
+    func paginationViewScrollViewWillBeginDragging(_ paginationView: PaginationView) {
+        delegate?.navigatorScrollViewWillBeginDragging(self)
+    }
+    
+    func paginationViewScrollViewDidEndDecelerating(_ paginationView: PaginationView) {
+        delegate?.navigatorScrollViewDidEndDecelerating(self)
     }
 }

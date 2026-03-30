@@ -7,6 +7,17 @@
 import ReadiumShared
 import UIKit
 
+class CustomScrollView: UIScrollView {
+    // we want to ignore top and bottom scrolling because of the spreads insets; it's causing scrolling chapter to chapter instead of inside a chapter's pages
+    // 44 pixels covers all scenarios: regular(44) and compact(20)
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        if point.y < 44 || point.y > self.frame.height-44 {
+            return nil
+        }
+        return super.hitTest(point, with: event)
+    }
+}
+
 enum PageLocation: Equatable {
     case start
     case end
@@ -43,6 +54,12 @@ protocol PaginationViewDelegate: AnyObject {
 
     /// Returns the number of positions (as in `Publication.positionList`) in the page view at given index.
     func paginationView(_ paginationView: PaginationView, positionCountAtIndex index: Int) -> Int
+    
+    /// Called when the user will begin dragging the scroll view
+    func paginationViewScrollViewWillBeginDragging(_ paginationView: PaginationView)
+    
+    /// Called when the scroll view did end decelerating
+    func paginationViewScrollViewDidEndDecelerating(_ paginationView: PaginationView)
 }
 
 final class PaginationView: UIView, Loggable {
@@ -91,7 +108,7 @@ final class PaginationView: UIView, Loggable {
         return orderedViews
     }
 
-    private let scrollView = UIScrollView()
+    private let scrollView = CustomScrollView()
 
     /// Allows the scroll view to scroll.
     var isScrollEnabled: Bool {
@@ -392,7 +409,11 @@ extension PaginationView: UIScrollViewDelegate {
         }
     }
 
-    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        delegate?.paginationViewScrollViewWillBeginDragging(self)
+    }
+
+    public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
         scrollView.isScrollEnabled = isScrollEnabled
 
         let currentOffset = (readingProgression == .rtl)
@@ -401,5 +422,7 @@ extension PaginationView: UIScrollViewDelegate {
 
         let newIndex = Int(round(currentOffset / scrollView.frame.width))
         setCurrentIndex(newIndex)
+        
+        delegate?.paginationViewScrollViewDidEndDecelerating(self)
     }
 }

@@ -430,4 +430,12 @@ final class EPUBReflowableSpreadView: EPUBSpreadView {
         super.scrollViewDidScroll(scrollView)
         setNeedsNotifyPagesDidChange()
     }
+
+    override func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        super.scrollViewWillBeginDragging(scrollView)
+    }
+
+    override func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        super.scrollViewDidEndDecelerating(scrollView)
+    }
 }
