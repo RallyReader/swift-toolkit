@@ -1,11 +1,11 @@
 //
-//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Copyright 2026 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
 
 import Foundation
-import R2Shared
+import ReadiumShared
 
 extension Array where Element == DecorationChange {
     /// Generates the JavaScript used to apply the receiver list of `DecorationChange` in a web view.
@@ -34,9 +34,9 @@ extension DecorationChange {
                 EPUBNavigatorViewController.log(.error, "Decoration style not registered: \(decoration.style.id)")
                 return nil
             }
-            var json = decoration.json
-            json["element"] = style.element(decoration)
-            guard let jsonString = serializeJSONString(json) else {
+            var json = decoration.jsonObject
+            json["element"] = .string(style.element(decoration))
+            guard let jsonString = try? json.jsonString() else {
                 EPUBNavigatorViewController.log(.error, "Can't serialize decoration to JSON: \(json)")
                 return nil
             }

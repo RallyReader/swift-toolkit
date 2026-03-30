@@ -1,18 +1,19 @@
 //
-//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Copyright 2026 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
 
 import Foundation
-import R2Shared
 import ReadiumInternal
+import ReadiumShared
 
 /// Setting values of the `PDFNavigatorViewController`.
 ///
 /// See `PDFPreferences`
 public struct PDFSettings: ConfigurableSettings {
     public let backgroundColor: Color?
+    public let fit: Fit
     public let offsetFirstPage: Bool
     public let pageSpacing: Double
     public let readingProgression: ReadingProgression
@@ -24,6 +25,10 @@ public struct PDFSettings: ConfigurableSettings {
     init(preferences: PDFPreferences, defaults: PDFDefaults, metadata: Metadata) {
         backgroundColor = preferences.backgroundColor
             ?? defaults.backgroundColor
+
+        fit = preferences.fit
+            ?? defaults.fit
+            ?? .auto
 
         offsetFirstPage = preferences.offsetFirstPage
             ?? defaults.offsetFirstPage
@@ -64,6 +69,7 @@ public struct PDFSettings: ConfigurableSettings {
 /// See `PDFPreferences`.
 public struct PDFDefaults {
     public var backgroundColor: Color?
+    public var fit: Fit?
     public var offsetFirstPage: Bool?
     public var pageSpacing: Double?
     public var readingProgression: ReadingProgression?
@@ -74,6 +80,7 @@ public struct PDFDefaults {
 
     public init(
         backgroundColor: Color? = nil,
+        fit: Fit? = nil,
         offsetFirstPage: Bool? = nil,
         pageSpacing: Double? = nil,
         readingProgression: ReadingProgression? = nil,
@@ -83,6 +90,7 @@ public struct PDFDefaults {
         visibleScrollbar: Bool? = nil
     ) {
         self.backgroundColor = backgroundColor
+        self.fit = fit
         self.offsetFirstPage = offsetFirstPage
         self.pageSpacing = pageSpacing
         self.readingProgression = readingProgression

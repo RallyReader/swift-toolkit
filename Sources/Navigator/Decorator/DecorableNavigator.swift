@@ -1,11 +1,11 @@
 //
-//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Copyright 2026 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
 
 import Foundation
-import R2Shared
+import ReadiumShared
 import UIKit
 
 /// A navigator able to render arbitrary decorations over a publication.
@@ -16,7 +16,7 @@ public protocol DecorableNavigator {
     /// submit the updated list of decorations when there are changes.
     /// Name each decoration group as you see fit. A good practice is to use the name of the feature requiring
     /// decorations, e.g. `annotation`, `search`, `tts`, etc.
-    func apply(decorations: [Decoration], enhanced: Bool, in group: String)
+    func apply(decorations: [Decoration], in group: String)
 
     /// Indicates whether the Navigator supports the given decoration `style`.
     ///
@@ -27,25 +27,13 @@ public protocol DecorableNavigator {
 
     /// Registers new callbacks for decoration interactions in the given `group`.
     ///
-    /// - Parameter onActivated: Called when the user activates the decoration, e.g. with a click or tap.
-    func observeDecorationInteractions(inGroup group: String, onActivated: OnActivatedCallback?)
-    
-    func observeDecorationRectCalculations(inGroup group: String, onActivated: OnRectCalculatedCallback?)
+    /// - Parameters:
+    ///   - group: The name of the decoration group to observe.
+    ///   - onActivated: Called when the user activates the decoration, e.g. with a click or tap.
+    func observeDecorationInteractions(inGroup group: String, onActivated: @escaping OnActivatedCallback)
 
     /// Called when the user activates a decoration, e.g. with a click or tap.
     typealias OnActivatedCallback = (_ event: OnDecorationActivatedEvent) -> Void
-    
-    /// Called when a decoration rect is calculated
-    typealias OnRectCalculatedCallback = (_ event: OnDecorationRectEvent) -> Void
-    
-    /// Adds additional decorations in the given decoration `group`.
-    ///
-    /// This does not refresh the existing list from the specified `group`
-    /// It is used to append decorations with the same efficiency even when the group gets big
-    func addDecorations(decorations: [Decoration], enhanced: Bool, in group: String, completion: @escaping () -> Void)
-    
-    
-    func remove(decoration: Decoration, in group: String)
 }
 
 /// Holds the metadata about a decoration activation interaction.
@@ -62,30 +50,11 @@ public struct OnDecorationActivatedEvent {
     public let point: CGPoint?
 }
 
-/// Holds the metadata about a decoration activation interaction.
-public struct OnDecorationRectEvent {
-    /// Activated decoration.
-    public let decorationId: Decoration.Id
-    /// Name of the group the decoration belongs to.
-    public let group: String
-    /// Frame of the bounding rect for the decoration, in the coordinate of the navigator view. This is only useful in
-    /// the context of a VisualNavigator.
-    public let rect: CGRect?
-    
-    public let ocrLayout: Bool
-}
-
-public extension DecorableNavigator {
-    func observeDecorationInteractions(inGroup group: String, onActivated: OnActivatedCallback? = nil) {
-        observeDecorationInteractions(inGroup: group, onActivated: onActivated)
-    }
-}
-
 /// A decoration is a user interface element drawn on top of a publication. It associates a `style` to be rendered with
 /// a discrete `locator` in the publication.
 ///
 /// For example, decorations can be used to draw highlights, images or buttons.
-public struct Decoration: Hashable {
+public struct Decoration: Hashable, JSONObjectEncodable {
     /// An identifier for this decoration. It must be unique in the group the decoration is applied to.
     public var id: Id
 
@@ -114,7 +83,7 @@ public struct Decoration: Hashable {
     /// instructions which makes sense for the resource type.
     public struct Style: Hashable {
         /// Unique ID for a style.
-        public struct Id: RawRepresentable, ExpressibleByStringLiteral, Hashable {
+        public struct Id: RawRepresentable, ExpressibleByStringLiteral, Hashable, JSONValueEncodable {
             public let rawValue: String
             public init(rawValue: String) {
                 self.rawValue = rawValue
@@ -122,6 +91,10 @@ public struct Decoration: Hashable {
 
             public init(stringLiteral value: StringLiteralType) {
                 self.init(rawValue: value)
+            }
+
+            public var jsonValue: JSONValue {
+                .string(rawValue)
             }
 
             // Default Readium style IDs.
@@ -156,12 +129,11 @@ public struct Decoration: Hashable {
         }
     }
 
-    public var json: [String: Any] {
-        [
+    public var jsonObject: [String: JSONValue] {
+        .init([
             "id": id,
-            "locator": locator.json,
-            "style": style.id.rawValue,
-            "userInfo": userInfo
-        ]
+            "locator": locator,
+            "style": style.id,
+        ])
     }
 }

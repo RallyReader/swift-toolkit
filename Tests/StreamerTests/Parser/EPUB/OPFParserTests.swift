@@ -1,35 +1,27 @@
 //
-//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Copyright 2026 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
 
-import R2Shared
-@testable import R2Streamer
+import ReadiumShared
+@testable import ReadiumStreamer
 import XCTest
 
 class OPFParserTests: XCTestCase {
     let fixtures = Fixtures(path: "OPF")
 
     func testParseMinimalOPF() throws {
-        let sut = try parseManifest("minimal", at: "/EPUB/content.opf")
+        let sut = try parseManifest("minimal", at: "EPUB/content.opf")
 
         XCTAssertEqual(sut.manifest, Manifest(
             metadata: Metadata(
                 conformsTo: [.epub],
                 title: "Alice's Adventures in Wonderland",
-                otherMetadata: [
-                    "presentation": [
-                        "continuous": false,
-                        "spread": "auto",
-                        "overflow": "auto",
-                        "orientation": "auto",
-                        "layout": "reflowable",
-                    ] as [String: Any],
-                ]
+                layout: .reflowable
             ),
             readingOrder: [
-                link(id: "titlepage", href: "/EPUB/titlepage.xhtml"),
+                link(href: "EPUB/titlepage.xhtml"),
             ]
         ))
     }
@@ -50,100 +42,215 @@ class OPFParserTests: XCTestCase {
     }
 
     func testParseLinks() throws {
-        let sut = try parseManifest("links", at: "/EPUB/content.opf").manifest
+        let sut = try parseManifest("links", at: "EPUB/content.opf").manifest
 
         XCTAssertEqual(sut.links, [])
         XCTAssertEqual(sut.readingOrder, [
-            link(id: "titlepage", href: "/titlepage.xhtml", type: "application/xhtml+xml"),
-            link(id: "chapter01", href: "/EPUB/chapter01.xhtml", type: "application/xhtml+xml"),
+            link(href: "titlepage.xhtml", mediaType: .xhtml),
+            Link(
+                href: "EPUB/chapter01.xhtml",
+                mediaType: .xhtml,
+                alternates: [
+                    Link(href: "EPUB/chapter01.smil", mediaType: .smil),
+                ]
+            ),
         ])
-        XCTAssertEqual(sut.resources, [
-            link(id: "font0", href: "/EPUB/fonts/MinionPro.otf", type: "application/vnd.ms-opentype"),
-            link(id: "nav", href: "/EPUB/nav.xhtml", type: "application/xhtml+xml", rels: [.contents]),
-            link(id: "css", href: "/style.css", type: "text/css"),
-            link(id: "chapter02", href: "/EPUB/chapter02.xhtml", type: "application/xhtml+xml"),
-            link(id: "chapter01_smil", href: "/EPUB/chapter01.smil", type: "application/smil+xml"),
-            link(id: "chapter02_smil", href: "/EPUB/chapter02.smil", type: "application/smil+xml", duration: 1949),
-            link(id: "img01a", href: "/EPUB/images/alice01a.png", type: "image/png", rels: [.cover]),
-            link(id: "img02a", href: "/EPUB/images/alice02a.gif", type: "image/gif"),
-            link(id: "nomediatype", href: "/EPUB/nomediatype.txt"),
+        XCTAssertEqual(sut.resources, try [
+            link(href: "EPUB/fonts/MinionPro.otf", mediaType: XCTUnwrap(MediaType("application/vnd.ms-opentype"))),
+            link(href: "EPUB/nav.xhtml", mediaType: .xhtml, rels: [.contents]),
+            link(href: "style.css", mediaType: .css),
+            link(href: "EPUB/chapter02.xhtml", mediaType: .xhtml),
+            Link(href: "EPUB/chapter02.smil", mediaType: .smil, duration: 1949.0),
+            link(href: "EPUB/images/alice01a.png", mediaType: .png, rels: [.cover]),
+            link(href: "EPUB/images/alice02a.gif", mediaType: .gif),
+            link(href: "EPUB/nomediatype.txt"),
         ])
     }
 
     func testParseLinksFromSpine() throws {
-        let sut = try parseManifest("links-spine", at: "/EPUB/content.opf").manifest
+        let sut = try parseManifest("links-spine", at: "EPUB/content.opf").manifest
 
         XCTAssertEqual(sut.readingOrder, [
-            link(id: "titlepage", href: "/EPUB/titlepage.xhtml"),
+            link(href: "EPUB/titlepage.xhtml"),
         ])
     }
 
     func testParseLinkProperties() throws {
-        let sut = try parseManifest("links-properties", at: "/EPUB/content.opf").manifest
+        let sut = try parseManifest("links-properties", at: "EPUB/content.opf").manifest
 
         XCTAssertEqual(sut.readingOrder.count, 8)
-        XCTAssertEqual(sut.readingOrder[0], link(id: "chapter01", href: "/EPUB/chapter01.xhtml", rels: [.contents], properties: Properties([
+        XCTAssertEqual(sut.readingOrder[0], link(href: "EPUB/chapter01.xhtml", rels: [.contents], properties: Properties([
             "contains": ["mathml"],
-            "orientation": "auto",
-            "overflow": "auto",
             "page": "right",
-            "layout": "fixed",
         ])))
-        XCTAssertEqual(sut.readingOrder[1], link(id: "chapter02", href: "/EPUB/chapter02.xhtml", properties: Properties([
+        XCTAssertEqual(sut.readingOrder[1], link(href: "EPUB/chapter02.xhtml", properties: Properties([
             "contains": ["remote-resources"],
-            "orientation": "landscape",
-            "overflow": "paginated",
             "page": "left",
-            "layout": "reflowable",
         ])))
-        XCTAssertEqual(sut.readingOrder[2], link(id: "chapter03", href: "/EPUB/chapter03.xhtml", properties: Properties([
+        XCTAssertEqual(sut.readingOrder[2], link(href: "EPUB/chapter03.xhtml", properties: Properties([
             "contains": ["js", "svg"],
-            "orientation": "portrait",
-            "overflow": "scrolled",
             "page": "center",
         ])))
-        XCTAssertEqual(sut.readingOrder[3], link(id: "chapter04", href: "/EPUB/chapter04.xhtml", properties: Properties([
+        XCTAssertEqual(sut.readingOrder[3], link(href: "EPUB/chapter04.xhtml", properties: Properties([
             "contains": ["onix", "xmp"],
-            "overflow": "scrolled",
-            "spread": "none",
         ])))
-        XCTAssertEqual(sut.readingOrder[4], link(id: "chapter05", href: "/EPUB/chapter05.xhtml", properties: Properties([
-            "spread": "both",
-        ])))
-        XCTAssertEqual(sut.readingOrder[5], link(id: "chapter06", href: "/EPUB/chapter06.xhtml", properties: Properties([
-            "spread": "landscape",
-        ])))
-        XCTAssertEqual(sut.readingOrder[6], link(id: "chapter07", href: "/EPUB/chapter07.xhtml", properties: Properties([
-            "spread": "none",
-        ])))
-        XCTAssertEqual(sut.readingOrder[7], link(id: "chapter08", href: "/EPUB/chapter08.xhtml", properties: Properties([
-            "spread": "both",
-        ])))
+        XCTAssertEqual(sut.readingOrder[4], link(href: "EPUB/chapter05.xhtml"))
+        XCTAssertEqual(sut.readingOrder[5], link(href: "EPUB/chapter06.xhtml"))
+        XCTAssertEqual(sut.readingOrder[6], link(href: "EPUB/chapter07.xhtml"))
+        XCTAssertEqual(sut.readingOrder[7], link(href: "EPUB/chapter08.xhtml"))
     }
 
     func testParseEPUB2Cover() throws {
-        let sut = try parseManifest("cover-epub2", at: "/EPUB/content.opf").manifest
+        let sut = try parseManifest("cover-epub2", at: "EPUB/content.opf").manifest
 
         XCTAssertEqual(sut.resources, [
-            link(id: "my-cover", href: "/EPUB/cover.jpg", type: "image/jpeg", rels: [.cover]),
+            link(href: "EPUB/cover.jpg", mediaType: .jpeg, rels: [.cover]),
         ])
     }
 
     func testParseEPUB3Cover() throws {
-        let sut = try parseManifest("cover-epub3", at: "/EPUB/content.opf").manifest
+        let sut = try parseManifest("cover-epub3", at: "EPUB/content.opf").manifest
 
         XCTAssertEqual(sut.resources, [
-            link(id: "my-cover", href: "/EPUB/cover.jpg", type: "image/jpeg", rels: [.cover]),
+            link(href: "EPUB/cover.jpg", mediaType: .jpeg, rels: [.cover]),
         ])
     }
 
-    // MARK: - Toolkit
+    // MARK: - Fallback Handling
 
-    func parseManifest(_ name: String, at path: String = "/EPUB/content.opf", displayOptions: String? = nil) throws -> (manifest: Manifest, version: String) {
+    /// When an image is in the spine with an HTML fallback, the image should be
+    /// in readingOrder and HTML should be added as an alternate.
+    func testParseImageInSpineWithHTMLFallback() throws {
+        let sut = try parseManifest("fallback-image-in-spine", at: "EPUB/content.opf").manifest
+
+        XCTAssertEqual(sut.readingOrder.count, 2)
+
+        // First image in spine
+        XCTAssertEqual(sut.readingOrder[0].href, "EPUB/page1.jpg")
+        XCTAssertEqual(sut.readingOrder[0].mediaType, .jpeg)
+        XCTAssertEqual(sut.readingOrder[0].alternates, [
+            Link(href: "EPUB/page1.xhtml", mediaType: .xhtml),
+        ])
+
+        // Second image in spine
+        XCTAssertEqual(sut.readingOrder[1].href, "EPUB/page2.png")
+        XCTAssertEqual(sut.readingOrder[1].mediaType, .png)
+        XCTAssertEqual(sut.readingOrder[1].alternates, [
+            Link(href: "EPUB/page2.xhtml", mediaType: .xhtml),
+        ])
+
+        // HTML fallbacks should not be in resources
+        XCTAssertTrue(sut.resources.isEmpty)
+    }
+
+    /// When HTML is in the spine with an image fallback, we swap: the image
+    /// should be in readingOrder and HTML should be added as an alternate.
+    func testParseHTMLInSpineWithImageFallback() throws {
+        let sut = try parseManifest("fallback-html-in-spine", at: "EPUB/content.opf").manifest
+
+        XCTAssertEqual(sut.readingOrder.count, 2)
+
+        // First item: image swapped into readingOrder, HTML as alternate
+        XCTAssertEqual(sut.readingOrder[0].href, "EPUB/page1.jpg")
+        XCTAssertEqual(sut.readingOrder[0].mediaType, .jpeg)
+        XCTAssertEqual(sut.readingOrder[0].alternates, [
+            Link(href: "EPUB/page1.xhtml", mediaType: .xhtml),
+        ])
+
+        // Second item: image swapped into readingOrder, HTML as alternate
+        XCTAssertEqual(sut.readingOrder[1].href, "EPUB/page2.png")
+        XCTAssertEqual(sut.readingOrder[1].mediaType, .png)
+        XCTAssertEqual(sut.readingOrder[1].alternates, [
+            Link(href: "EPUB/page2.xhtml", mediaType: .xhtml),
+        ])
+
+        // Fallback images should not be in resources
+        XCTAssertTrue(sut.resources.isEmpty)
+    }
+
+    /// General fallback handling: any fallback should be translated to an
+    /// alternate.
+    func testParseGeneralFallbackAsAlternate() throws {
+        let sut = try parseManifest("fallback-general", at: "EPUB/content.opf").manifest
+
+        XCTAssertEqual(sut.readingOrder.count, 2)
+
+        // First item: XHTML with XHTML fallback
+        XCTAssertEqual(sut.readingOrder[0].href, "EPUB/chapter1.xhtml")
+        XCTAssertEqual(sut.readingOrder[0].mediaType, .xhtml)
+        XCTAssertEqual(sut.readingOrder[0].alternates, [
+            Link(href: "EPUB/chapter1-alt.xhtml", mediaType: .xhtml),
+        ])
+
+        // Second item: XHTML with PDF fallback
+        XCTAssertEqual(sut.readingOrder[1].href, "EPUB/chapter2.xhtml")
+        XCTAssertEqual(sut.readingOrder[1].mediaType, .xhtml)
+        XCTAssertEqual(sut.readingOrder[1].alternates, [
+            Link(href: "EPUB/chapter2.pdf", mediaType: .pdf),
+        ])
+
+        // Fallback resources should not be in resources
+        XCTAssertTrue(sut.resources.isEmpty)
+    }
+
+    // MARK: - Divina Inference
+
+    /// When all spine items are bitmaps, the metadata should have:
+    /// - `layout = .fixed` to use the FXL navigator
+    /// - `.divina` added to `conformsTo`
+    func testParseAllImagesInSpineSetsFixedLayoutAndDivinaProfile() throws {
+        let sut = try parseManifest("all-images-in-spine", at: "EPUB/content.opf").manifest
+
+        // Should have fixed layout
+        XCTAssertEqual(sut.metadata.layout, .fixed)
+
+        // Should conform to both EPUB and Divina
+        XCTAssertTrue(sut.metadata.conformsTo.contains(.epub))
+        XCTAssertTrue(sut.metadata.conformsTo.contains(.divina))
+
+        // Reading order should contain all images
+        XCTAssertEqual(sut.readingOrder.count, 3)
+        XCTAssertEqual(sut.readingOrder[0].mediaType, .jpeg)
+        XCTAssertEqual(sut.readingOrder[1].mediaType, .png)
+        XCTAssertEqual(sut.readingOrder[2].mediaType, .gif)
+    }
+
+    /// When not all spine items are bitmaps, the metadata should NOT have
+    /// `.divina` profile and layout should remain reflowable.
+    func testParseMixedSpineDoesNotSetDivinaProfile() throws {
+        let sut = try parseManifest("fallback-image-html-mixed", at: "EPUB/content.opf").manifest
+
+        // Should have reflowable layout (default)
+        XCTAssertEqual(sut.metadata.layout, .reflowable)
+
+        // Should only conform to EPUB, not Divina
+        XCTAssertTrue(sut.metadata.conformsTo.contains(.epub))
+        XCTAssertFalse(sut.metadata.conformsTo.contains(.divina))
+    }
+
+    // MARK: - Media Overlays
+
+    func testParseMediaOverlaysSmilAsAlternate() throws {
+        let sut = try parseManifest("media-overlays", at: "EPUB/content.opf").manifest
+
+        // SMIL should be an alternate of each reading order item, not in resources
+        XCTAssertEqual(sut.readingOrder[0].href, "EPUB/chapter01.xhtml")
+        XCTAssertEqual(sut.readingOrder[0].alternates, [
+            Link(href: "EPUB/chapter01.smil", mediaType: .smil, duration: 1425.0),
+        ])
+        XCTAssertEqual(sut.readingOrder[1].href, "EPUB/chapter02.xhtml")
+        XCTAssertEqual(sut.readingOrder[1].alternates, [
+            Link(href: "EPUB/chapter02.smil", mediaType: .smil, duration: 524.0),
+        ])
+        XCTAssertTrue(sut.resources.isEmpty)
+    }
+
+    // MARK: - Helpers
+
+    func parseManifest(_ name: String, at path: String = "EPUB/content.opf", displayOptions: String? = nil) throws -> (manifest: Manifest, version: String) {
         let parts = try OPFParser(
-            basePath: path,
+            baseURL: XCTUnwrap(RelativeURL(path: path)),
             data: fixtures.data(at: "\(name).opf"),
-            fallbackTitle: "title",
             displayOptionsData: displayOptions.map { fixtures.data(at: "\($0).xml") },
             encryptions: [:]
         ).parsePublication()
@@ -155,11 +262,7 @@ class OPFParserTests: XCTestCase {
         ), parts.version)
     }
 
-    func link(id: String? = nil, href: String, type: String? = nil, templated: Bool = false, title: String? = nil, rels: [LinkRelation] = [], properties: Properties = .init(), duration: Double? = nil, children: [Link] = []) -> Link {
-        var properties = properties.otherProperties
-        if let id = id {
-            properties["id"] = id
-        }
-        return Link(href: href, type: type, templated: templated, title: title, rels: rels, properties: Properties(properties), duration: duration, children: children)
+    func link(href: String, mediaType: MediaType? = nil, templated: Bool = false, title: String? = nil, rels: [LinkRelation] = [], properties: Properties = .init(), children: [Link] = []) -> Link {
+        Link(href: href, mediaType: mediaType, templated: templated, title: title, rels: rels, properties: properties, children: children)
     }
 }

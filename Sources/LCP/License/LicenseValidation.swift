@@ -1,11 +1,11 @@
 //
-//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Copyright 2026 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
 
 import Foundation
-import R2Shared
+import ReadiumShared
 
 /// To modify depending of the profiles supported by liblcp.a.
 private let supportedProfiles = [
@@ -23,12 +23,12 @@ private let supportedProfiles = [
     "http://readium.org/lcp/profile-2.9",
 ]
 
-typealias Context = Either<LCPClientContext, StatusError>
+typealias Context = Result<LCPClientContext, LCPError>
 
-// Holds the License/Status Documents and the DRM context, once validated.
+/// Holds the License/Status Documents and the DRM context, once validated.
 struct ValidatedDocuments {
     let license: LicenseDocument
-    fileprivate let context: Context
+    let context: Context
     let status: StatusDocument?
 
     fileprivate init(_ license: LicenseDocument, _ context: Context, _ status: StatusDocument? = nil) {
@@ -36,22 +36,13 @@ struct ValidatedDocuments {
         self.context = context
         self.status = status
     }
-
-    func getContext() throws -> LCPClientContext {
-        switch context {
-        case let .left(context):
-            return context
-        case let .right(error):
-            throw error
-        }
-    }
 }
 
 /// Validation workflow of the License and Status Documents.
 ///
 /// Use `validate` to start the validation of a Document.
 /// Use `observe` to be notified when any validation is done or if an error occurs.
-final class LicenseValidation: Loggable {
+final actor LicenseValidation: Loggable {
     // Dependencies for the State's handlers
     fileprivate let isProduction: Bool
     fileprivate let client: LCPClient
@@ -63,16 +54,15 @@ final class LicenseValidation: Loggable {
     fileprivate let httpClient: HTTPClient
     fileprivate let passphrases: PassphrasesService
 
-    // List of observers notified when the Documents are validated, or if an error occurred.
+    /// List of observers notified when the Documents are validated, or if an error occurred.
     fileprivate var observers: [(callback: Observer, policy: ObserverPolicy)] = []
 
-    fileprivate let onLicenseValidated: (LicenseDocument) throws -> Void
+    fileprivate let onLicenseValidated: (LicenseDocument) async throws -> Void
 
-    // Current state in the validation steps.
+    /// Current state in the validation steps.
     private(set) var state: State = .start {
         didSet {
             log(.debug, "* \(state)")
-            handle(state)
         }
     }
 
@@ -86,7 +76,7 @@ final class LicenseValidation: Loggable {
         device: DeviceService,
         httpClient: HTTPClient,
         passphrases: PassphrasesService,
-        onLicenseValidated: @escaping (LicenseDocument) throws -> Void
+        onLicenseValidated: @escaping (LicenseDocument) async throws -> Void
     ) {
         self.authentication = authentication
         self.allowUserInteraction = allowUserInteraction
@@ -100,7 +90,7 @@ final class LicenseValidation: Loggable {
         self.onLicenseValidated = onLicenseValidated
     }
 
-    // Raw Document's data to validate.
+    /// Raw Document's data to validate.
     enum Document {
         case license(Data)
         case status(Data)
@@ -108,7 +98,7 @@ final class LicenseValidation: Loggable {
 
     /// Validates the given License or Status Document.
     /// If a validation is already running, `LCPError.licenseIsBusy` will be reported.
-    func validate(_ document: Document) -> Deferred<ValidatedDocuments, Error> {
+    func validate(_ document: Document) async throws -> ValidatedDocuments {
         let event: Event
         switch document {
         case let .license(data):
@@ -117,7 +107,8 @@ final class LicenseValidation: Loggable {
             event = .retrievedStatusData(data)
         }
 
-        return observe(raising: event)
+        async let _ = raise(event)
+        return try await observe()
     }
 }
 
@@ -162,12 +153,14 @@ extension LicenseValidation {
                 } else {
                     self = .fetchStatus(license)
                 }
+
             case let (.validateLicense(_, _), .failed(error)):
                 self = .failure(error)
 
             // 2. Fetch the status document
             case let (.fetchStatus(license), .retrievedStatusData(data)):
                 self = .validateStatus(license, data)
+
             case let (.fetchStatus(license), .failed(_)):
                 // We ignore any error while fetching the Status Document, as it is optional
                 self = .checkLicenseStatus(license, nil, statusDocumentTakesPrecedence: false)
@@ -180,6 +173,7 @@ extension LicenseValidation {
                 } else {
                     self = .checkLicenseStatus(license, status, statusDocumentTakesPrecedence: false)
                 }
+
             case let (.validateStatus(license, _), .failed(_)):
                 // We ignore any error while validating the Status Document, as it is optional
                 self = .checkLicenseStatus(license, nil, statusDocumentTakesPrecedence: false)
@@ -187,6 +181,7 @@ extension LicenseValidation {
             // 3. Get an updated license if needed
             case let (.fetchLicense(_, status), .retrievedLicenseData(data)):
                 self = .validateLicense(data, status)
+
             case let (.fetchLicense(license, status), .failed(_)):
                 // We ignore any error while fetching the updated License Document
                 // Note: since we failed to get the updated License, then the Status Document will take precedence over the License when checking the status.
@@ -195,7 +190,7 @@ extension LicenseValidation {
             // 4. Check the dates and license status
             case let (.checkLicenseStatus(license, status, _), .checkedLicenseStatus(error)):
                 if let error = error {
-                    self = .valid(ValidatedDocuments(license, .right(error), status))
+                    self = .valid(ValidatedDocuments(license, .failure(.licenseStatus(error)), status))
                 } else {
                     self = .requestPassphrase(license, status)
                 }
@@ -203,19 +198,22 @@ extension LicenseValidation {
             // 5. Get the passphrase associated with the license
             case let (.requestPassphrase(license, status), .retrievedPassphrase(passphrase)):
                 self = .validateIntegrity(license, status, passphrase: passphrase)
+
             case let (.requestPassphrase, .failed(error)):
                 self = .failure(error)
-            case (.requestPassphrase, .cancelled):
-                self = .start
+
+            case let (.requestPassphrase(license, status), .passphraseNotFound):
+                self = .valid(ValidatedDocuments(license, .failure(.missingPassphrase), status))
 
             // 6. Validate the license integrity
             case let (.validateIntegrity(license, status, _), .validatedIntegrity(context)):
-                let documents = ValidatedDocuments(license, .left(context), status)
+                let documents = ValidatedDocuments(license, .success(context), status)
                 if let link = status?.link(for: .register) {
                     self = .registerDevice(documents, link)
                 } else {
                     self = .valid(documents)
                 }
+
             case let (.validateIntegrity(_, _, _), .failed(error)):
                 self = .failure(error)
 
@@ -226,6 +224,7 @@ extension LicenseValidation {
                 } else {
                     self = .valid(documents)
                 }
+
             case let (.registerDevice(documents, _), .failed(_)):
                 // We ignore any error while registrating the device
                 self = .valid(documents)
@@ -245,42 +244,39 @@ extension LicenseValidation {
     }
 
     fileprivate enum Event {
-        // Raised when reading the License from its container, or when updating it from an LCP server.
+        /// Raised when reading the License from its container, or when updating it from an LCP server.
         case retrievedLicenseData(Data)
-        // Raised when the License Document is parsed and its structure is validated.
+        /// Raised when the License Document is parsed and its structure is validated.
         case validatedLicense(LicenseDocument)
-        // Raised after fetching the Status Document, or receiving it as a response of an LSD interaction.
+        /// Raised after fetching the Status Document, or receiving it as a response of an LSD interaction.
         case retrievedStatusData(Data)
-        // Raised after parsing and validating a Status Document's data.
+        /// Raised after parsing and validating a Status Document's data.
         case validatedStatus(StatusDocument)
-        // Raised after the License's status was checked, with any occurred status error.
+        /// Raised after the License's status was checked, with any occurred status error.
         case checkedLicenseStatus(StatusError?)
-        // Raised when we retrieved the passphrase from the local database, or from prompting the user.
+        /// Raised when we retrieved the passphrase from the local database, or from prompting the user.
         case retrievedPassphrase(String)
-        // Raised after validating the integrity of the License using liblcp.a.
+        /// Raised after validating the integrity of the License using liblcp.a.
         case validatedIntegrity(LCPClientContext)
-        // Raised when the device is registered, with an optional updated Status Document.
+        /// Raised when the device is registered, with an optional updated Status Document.
         case registeredDevice(Data?)
-        // Raised when any error occurs during the validation workflow.
+        /// Raised when any error occurs during the validation workflow.
         case failed(Error)
-        // Raised when the user cancelled the validation.
-        case cancelled
+        /// Raised when no passphrase could be found or given by the user.
+        case passphraseNotFound
     }
 
     /// Should be called by the state handlers once they're done, to go to the next State.
-    private func raise(_ event: Event) throws {
+    private func raise(_ event: Event) async throws {
         log(.debug, "-> on \(event)")
-        guard Thread.isMainThread else {
-            throw LCPError.runtime("\(type(of: self)): To be safe, events must only be raised from the main thread")
-        }
-
         try state.transition(event)
+        await handle(state)
     }
 }
 
 /// State's handlers
 extension LicenseValidation {
-    private func validateLicense(data: Data) throws {
+    private func validateLicense(data: Data) async throws {
         let license = try LicenseDocument(data: data)
 
         // In test mode, only the basic profile is authorized.
@@ -289,34 +285,44 @@ extension LicenseValidation {
             throw LCPError.licenseProfileNotSupported
         }
 
-        try onLicenseValidated(license)
-        try raise(.validatedLicense(license))
+        try await onLicenseValidated(license)
+        try await raise(.validatedLicense(license))
     }
 
-    private func fetchStatus(of license: LicenseDocument) throws {
+    private func fetchStatus(of license: LicenseDocument) async throws {
         let url = try license.url(for: .status, preferredType: .lcpStatusDocument)
-        // Short timeout to avoid blocking the License, since the LSD is optional.
-        httpClient.fetch(HTTPRequest(url: url, headers: ["Accept": MediaType.lcpStatusDocument.string], timeoutInterval: 5))
-            .map { .retrievedStatusData($0.body ?? Data()) }
-            .eraseToAnyError()
-            .resolve(raise)
+
+        let data = try await httpClient
+            .fetch(HTTPRequest(
+                url: url,
+                headers: ["Accept": MediaType.lcpStatusDocument.string],
+                // Short timeout to avoid blocking the License, since the LSD is optional.
+                timeoutInterval: 5
+            ))
+            .map { $0.body ?? Data() }
+            .get()
+
+        try await raise(.retrievedStatusData(data))
     }
 
-    private func validateStatus(data: Data) throws {
+    private func validateStatus(data: Data) async throws {
         let status = try StatusDocument(data: data)
-        try raise(.validatedStatus(status))
+        try await raise(.validatedStatus(status))
     }
 
-    private func fetchLicense(from status: StatusDocument) throws {
+    private func fetchLicense(from status: StatusDocument) async throws {
         let url = try status.url(for: .license, preferredType: .lcpLicenseDocument)
-        // Short timeout to avoid blocking the License, since it can be updated next time.
-        httpClient.fetch(HTTPRequest(url: url, timeoutInterval: 5))
-            .map { .retrievedLicenseData($0.body ?? Data()) }
-            .eraseToAnyError()
-            .resolve(raise)
+
+        let data = try await httpClient
+            // Short timeout to avoid blocking the License, since it can be updated next time.
+            .fetch(HTTPRequest(url: url, timeoutInterval: 5))
+            .map { $0.body ?? Data() }
+            .get()
+
+        try await raise(.retrievedLicenseData(data))
     }
 
-    private func checkLicenseStatus(of license: LicenseDocument, status: StatusDocument?, statusDocumentTakesPrecedence: Bool) throws {
+    private func checkLicenseStatus(of license: LicenseDocument, status: StatusDocument?, statusDocumentTakesPrecedence: Bool) async throws {
         var error: StatusError?
 
         let now = Date()
@@ -348,16 +354,23 @@ extension LicenseValidation {
             }
         }
 
-        try raise(.checkedLicenseStatus(error))
+        try await raise(.checkedLicenseStatus(error))
     }
 
-    private func requestPassphrase(for license: LicenseDocument) {
-        passphrases.request(for: license, authentication: authentication, allowUserInteraction: allowUserInteraction, sender: sender)
-            .map { .retrievedPassphrase($0) }
-            .resolve(raise)
+    private func requestPassphrase(for license: LicenseDocument) async throws {
+        if let passphrase = try await passphrases.request(
+            for: license,
+            authentication: authentication,
+            allowUserInteraction: allowUserInteraction,
+            sender: sender
+        ) {
+            try await raise(.retrievedPassphrase(passphrase))
+        } else {
+            try await raise(.passphraseNotFound)
+        }
     }
 
-    private func validateIntegrity(of license: LicenseDocument, with passphrase: String) throws {
+    private func validateIntegrity(of license: LicenseDocument, with passphrase: String) async throws {
         // 1. Checks the profile
         let profile = license.encryption.profile
         guard supportedProfiles.contains(profile) else {
@@ -365,109 +378,95 @@ extension LicenseValidation {
         }
 
         // 2. Creates the DRM context
-        crl.retrieve()
-            .tryMap { crl -> Event in
-                let context = try self.client.createContext(jsonLicense: license.json, hashedPassphrase: passphrase, pemCrl: crl)
-                return .validatedIntegrity(context)
-            }
-            .resolve(raise)
+        let pemCrl = try await crl.retrieve()
+        let context = try client.createContext(jsonLicense: license.jsonString, hashedPassphrase: passphrase, pemCrl: pemCrl)
+
+        try await raise(.validatedIntegrity(context))
     }
 
-    private func registerDevice(for license: LicenseDocument, at link: Link) {
-        device.registerLicense(license, at: link)
-            .map { data in .registeredDevice(data) }
-            .resolve(raise)
+    private func registerDevice(for license: LicenseDocument, at link: Link) async throws {
+        let data = try await device.registerLicense(license, at: link)
+        try await raise(.registeredDevice(data))
     }
 
-    private func handle(_ state: State) {
+    private func handle(_ state: State) async {
         // Boring glue to call the handlers when a state occurs
         do {
             switch state {
             case .start:
-                // We are back to start? It means the validation was cancelled by the user.
-                notifyObservers(.cancelled)
+                // We are back to start? This should not happen.
+                throw LCPError.runtime("Unexpected license validation state")
             case let .validateLicense(data, _):
-                try validateLicense(data: data)
+                try await validateLicense(data: data)
             case let .fetchStatus(license):
-                try fetchStatus(of: license)
+                try await fetchStatus(of: license)
             case let .validateStatus(_, data):
-                try validateStatus(data: data)
+                try await validateStatus(data: data)
             case let .fetchLicense(_, status):
-                try fetchLicense(from: status)
+                try await fetchLicense(from: status)
             case let .checkLicenseStatus(license, status, statusDocumentTakesPrecedence):
-                try checkLicenseStatus(of: license, status: status, statusDocumentTakesPrecedence: statusDocumentTakesPrecedence)
+                try await checkLicenseStatus(of: license, status: status, statusDocumentTakesPrecedence: statusDocumentTakesPrecedence)
             case let .requestPassphrase(license, _):
-                requestPassphrase(for: license)
+                try await requestPassphrase(for: license)
             case let .validateIntegrity(license, _, passphrase):
-                try validateIntegrity(of: license, with: passphrase)
+                try await validateIntegrity(of: license, with: passphrase)
             case let .registerDevice(documents, link):
-                registerDevice(for: documents.license, at: link)
+                try await registerDevice(for: documents.license, at: link)
             case let .valid(documents):
                 notifyObservers(.success(documents))
             case let .failure(error):
                 notifyObservers(.failure(error))
             }
         } catch {
-            try? raise(.failed(error))
-        }
-    }
-
-    /// Syntactic sugar to raise either the given event, or an error wrapped as an Event.failed.
-    /// Can be used to resolve a Deferred<Event, Error>.
-    private func raise(_ result: CancellableResult<Event, Error>) {
-        switch result {
-        case let .success(event):
-            do {
-                try raise(event)
-            } catch {
-                try? raise(.failed(error))
-            }
-        case let .failure(error):
-            try? raise(.failed(error))
-        case .cancelled:
-            try? raise(Event.cancelled)
+            try? await raise(.failed(error))
         }
     }
 }
 
 /// Validation observers
 extension LicenseValidation {
-    typealias Observer = (CancellableResult<ValidatedDocuments, Error>) -> Void
+    typealias Observer = (Result<ValidatedDocuments, Error>) -> Void
 
     enum ObserverPolicy {
-        // The observer is automatically removed when called.
+        /// The observer is automatically removed when called.
         case once
-        // The observer is called everytime the validation is finished.
+        /// The observer is called everytime the validation is finished.
         case always
     }
 
-    /// Observes the validation occured after raising the given event.
-    private func observe(raising event: Event) -> Deferred<ValidatedDocuments, Error> {
-        deferredCatching(on: .main) { completion in
-            try self.raise(event)
-            self.observe(.once, completion)
+    nonisolated func observe(_ policy: ObserverPolicy = .always, _ observer: @escaping Observer) {
+        Task {
+            // If the state is already valid or a failure, we notify it to the observer right away.
+            var notified = true
+            switch await state {
+            case let .valid(documents):
+                observer(.success(documents))
+            case let .failure(error):
+                observer(.failure(error))
+            default:
+                notified = false
+            }
+
+            guard !notified || policy == .always else {
+                return
+            }
+            await addObserver(observer, policy: policy)
         }
     }
 
-    func observe(_ policy: ObserverPolicy = .always, _ observer: @escaping Observer) {
-        // If the state is already valid or a failure, we notify it to the observer right away.
-        var notified = true
-        switch state {
-        case let .valid(documents):
-            observer(.success(documents))
-        case let .failure(error):
-            observer(.failure(error))
-        default:
-            notified = false
-        }
-
-        guard !notified || policy == .always else {
-            return
-        }
+    private func addObserver(_ observer: @escaping Observer, policy: ObserverPolicy) {
         observers.append((observer, policy))
     }
 
-    private func notifyObservers(_ result: CancellableResult<ValidatedDocuments, Error>) {
+    func observe() async throws -> ValidatedDocuments {
+        try await withCheckedThrowingContinuation { continuation in
+            observe(.once) { result in
+                continuation.resume(with: result)
+            }
+        }
+    }
+
+    private func notifyObservers(_ result: Result<ValidatedDocuments, Error>) {
         for observer in observers {
             observer.callback(result)
         }

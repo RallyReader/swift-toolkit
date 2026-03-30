@@ -1,16 +1,16 @@
 //
-//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Copyright 2026 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
 
-@testable import R2Shared
+@testable import ReadiumShared
 import XCTest
 
 class PropertiesTests: XCTestCase {
     func testParseMinimalJSON() {
         XCTAssertEqual(
-            try? Properties(json: [:] as [String: Any]),
+            try? Properties(json: [:] as JSONValue),
             Properties()
         )
     }
@@ -20,7 +20,7 @@ class PropertiesTests: XCTestCase {
             try? Properties(json: [
                 "other-property1": "value",
                 "other-property2": [42],
-            ] as [String: Any]),
+            ] as JSONValue),
             Properties([
                 "other-property1": "value",
                 "other-property2": [42],
@@ -33,44 +33,51 @@ class PropertiesTests: XCTestCase {
     }
 
     func testParseJSONAllowsNil() {
-        XCTAssertNil(try Properties(json: nil))
+        XCTAssertNil(try Properties(json: nil as JSONValue?))
     }
 
     func testGetMinimalJSON() {
-        AssertJSONEqual(Properties().json, [:] as [String: Any])
+        XCTAssertEqual(Properties().jsonObject, [:] as [String: JSONValue])
     }
 
     func testGetFullJSON() {
-        AssertJSONEqual(
+        XCTAssertEqual(
             Properties([
                 "other-property1": "value",
                 "other-property2": [42],
-            ]).json as Any,
+            ]).jsonObject as [String: JSONValue],
             [
                 "other-property1": "value",
                 "other-property2": [42],
-            ] as [String: Any]
+            ] as [String: JSONValue]
         )
     }
 
-    func testAddingProperties() {
-        let properties = Properties([
+    func testAddProperties() {
+        var properties = Properties([
             "other-property1": "value",
             "other-property2": [42],
         ])
-
-        let copy = properties.adding([
+        properties.add([
             "additional": "property",
             "other-property1": "override",
         ])
 
-        AssertJSONEqual(
-            copy.json as Any,
+        XCTAssertEqual(
+            properties.jsonObject as [String: JSONValue],
             [
                 "other-property1": "override",
                 "other-property2": [42],
                 "additional": "property",
-            ] as [String: Any]
+            ] as [String: JSONValue]
         )
+    }
+
+    func testGetPageWhenMissing() {
+        XCTAssertNil(Properties().page)
+    }
+
+    func testGetPageWhenAvailable() {
+        XCTAssertEqual(Properties(["page": "center"]).page, .center)
     }
 }

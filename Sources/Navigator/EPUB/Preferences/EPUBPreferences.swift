@@ -1,11 +1,11 @@
 //
-//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Copyright 2026 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
 
 import Foundation
-import R2Shared
+import ReadiumShared
 
 /// Preferences for the `EPUBNavigatorViewController`.
 public struct EPUBPreferences: ConfigurablePreferences {
@@ -17,6 +17,13 @@ public struct EPUBPreferences: ConfigurablePreferences {
     /// Number of reflowable columns to display (one-page view or two-page
     /// spread).
     public var columnCount: ColumnCount?
+
+    /// Method for fitting the content of a fixed-layout publication within the
+    /// viewport.
+    ///
+    /// - `auto` or `page`: Fit entire page within viewport (default).
+    /// - `width`: Fit page width, allow vertical scrolling if needed.
+    public var fit: Fit?
 
     /// Default typeface for the text.
     public var fontFamily: FontFamily?
@@ -44,6 +51,12 @@ public struct EPUBPreferences: ConfigurablePreferences {
 
     /// Leading line height.
     public var lineHeight: Double?
+
+    /// Indicates whether the first page should be displayed alone and centered
+    /// instead of alongside the second page.
+    ///
+    /// This is only effective if spreads are enabled.
+    public var offsetFirstPage: Bool?
 
     /// Factor applied to horizontal margins.
     public var pageMargins: Double?
@@ -97,6 +110,7 @@ public struct EPUBPreferences: ConfigurablePreferences {
     public init(
         backgroundColor: Color? = nil,
         columnCount: ColumnCount? = nil,
+        fit: Fit? = nil,
         fontFamily: FontFamily? = nil,
         fontSize: Double? = nil,
         fontWeight: Double? = nil,
@@ -106,6 +120,7 @@ public struct EPUBPreferences: ConfigurablePreferences {
         letterSpacing: Double? = nil,
         ligatures: Bool? = nil,
         lineHeight: Double? = nil,
+        offsetFirstPage: Bool? = nil,
         pageMargins: Double? = nil,
         paragraphIndent: Double? = nil,
         paragraphSpacing: Double? = nil,
@@ -123,6 +138,7 @@ public struct EPUBPreferences: ConfigurablePreferences {
     ) {
         self.backgroundColor = backgroundColor
         self.columnCount = columnCount
+        self.fit = fit
         self.fontFamily = fontFamily
         self.fontSize = fontSize.map { max($0, 0) }
         self.fontWeight = fontWeight?.clamped(to: 0.0 ... 2.5)
@@ -132,6 +148,7 @@ public struct EPUBPreferences: ConfigurablePreferences {
         self.letterSpacing = letterSpacing.map { max($0, 0) }
         self.ligatures = ligatures
         self.lineHeight = lineHeight
+        self.offsetFirstPage = offsetFirstPage
         self.pageMargins = pageMargins.map { max($0, 0) }
         self.paragraphIndent = paragraphIndent
         self.paragraphSpacing = paragraphSpacing.map { max($0, 0) }
@@ -152,6 +169,7 @@ public struct EPUBPreferences: ConfigurablePreferences {
         EPUBPreferences(
             backgroundColor: other.backgroundColor ?? backgroundColor,
             columnCount: other.columnCount ?? columnCount,
+            fit: other.fit ?? fit,
             fontFamily: other.fontFamily ?? fontFamily,
             fontSize: other.fontSize ?? fontSize,
             fontWeight: other.fontWeight ?? fontWeight,
@@ -161,6 +179,7 @@ public struct EPUBPreferences: ConfigurablePreferences {
             letterSpacing: other.letterSpacing ?? letterSpacing,
             ligatures: other.ligatures ?? ligatures,
             lineHeight: other.lineHeight ?? lineHeight,
+            offsetFirstPage: other.offsetFirstPage ?? offsetFirstPage,
             pageMargins: other.pageMargins ?? pageMargins,
             paragraphIndent: other.paragraphIndent ?? paragraphIndent,
             paragraphSpacing: other.paragraphSpacing ?? paragraphSpacing,
@@ -183,6 +202,7 @@ public struct EPUBPreferences: ConfigurablePreferences {
     public func filterSharedPreferences() -> EPUBPreferences {
         var prefs = self
         prefs.language = nil
+        prefs.offsetFirstPage = nil
         prefs.readingProgression = nil
         prefs.spread = nil
         prefs.verticalText = nil
@@ -194,6 +214,7 @@ public struct EPUBPreferences: ConfigurablePreferences {
     public func filterPublicationPreferences() -> EPUBPreferences {
         EPUBPreferences(
             language: language,
+            offsetFirstPage: offsetFirstPage,
             readingProgression: readingProgression,
             spread: spread,
             verticalText: verticalText

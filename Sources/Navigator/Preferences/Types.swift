@@ -1,11 +1,11 @@
 //
-//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Copyright 2026 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
 
 import Foundation
-import R2Shared
+import ReadiumShared
 import UIKit
 
 /// Layout axis.
@@ -23,20 +23,6 @@ public enum Spread: String, Codable, Hashable {
     case never
     /// The publication should always be displayed in a spread.
     case always
-
-    init?(_ spread: R2Shared.Presentation.Spread?) {
-        guard let spread = spread else {
-            return nil
-        }
-        switch spread {
-        case .both:
-            self = .always
-        case .none:
-            self = .never
-        case .auto, .landscape:
-            self = .auto
-        }
-    }
 }
 
 /// Direction of the reading progression across resources.
@@ -44,26 +30,16 @@ public enum ReadingProgression: String, Codable, Hashable {
     case ltr
     case rtl
 
-    init?(_ readingProgression: R2Shared.ReadingProgression) {
+    init?(_ readingProgression: ReadiumShared.ReadingProgression) {
         switch readingProgression {
         case .ltr: self = .ltr
         case .rtl: self = .rtl
         default: return nil
         }
     }
-
-    /// Returns the leading Page for the reading progression.
-    var leadingPage: Presentation.Page {
-        switch self {
-        case .ltr:
-            return .left
-        case .rtl:
-            return .right
-        }
-    }
 }
 
-extension R2Shared.ReadingProgression {
+extension ReadiumShared.ReadingProgression {
     init(_ readingProgression: ReadingProgression) {
         switch readingProgression {
         case .ltr: self = .ltr
@@ -72,12 +48,15 @@ extension R2Shared.ReadingProgression {
     }
 }
 
-/// Method for constraining a resource inside the viewport.
+/// Method for fitting the content within the viewport.
 public enum Fit: String, Codable, Hashable {
-    case cover
-    case contain
+    /// Use the best fitting strategy depending on the current settings and
+    /// content.
+    case auto
+    /// The content is scaled to fit both dimensions within the viewport.
+    case page
+    /// The content is scaled to fit the viewport width.
     case width
-    case height
 }
 
 /// Reader theme for reflowable documents.
@@ -235,7 +214,7 @@ public struct FontFamily: RawRepresentable, ExpressibleByStringLiteral, Codable,
     // Modern (serif)
     public static let athelas: FontFamily = "Athelas"
     public static let georgia: FontFamily = "Georgia"
-    // Neutral (sans)
+    /// Neutral (sans)
     public static let helveticaNeue: FontFamily = "Helvetica Neue"
     // Humanist (sans)
     public static let seravek: FontFamily = "Seravek"

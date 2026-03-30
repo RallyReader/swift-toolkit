@@ -1,22 +1,29 @@
 //
-//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Copyright 2026 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
 
 import Foundation
-import Fuzi
-import R2Shared
+import ReadiumFuzi
+import ReadiumShared
 
 /// Package vocabularies used for `property`, `properties`, `scheme` and `rel`.
 /// http://www.idpf.org/epub/301/spec/epub-publications.html#sec-metadata-assoc
 enum OPFVocabulary: String {
-    // Fallback prefixes for metadata's properties and links' rels.
+    /// Fallback prefixes for metadata's properties and links' rels.
     case defaultMetadata, defaultLinkRel
-    // Reserved prefixes (https://idpf.github.io/epub-prefixes/packages/).
+
+    /// Reserved prefixes
+    /// https://idpf.github.io/epub-prefixes/packages/
     case a11y, dcterms, epubsc, marc, media, onix, rendition, schema, xsd
-    // Additional prefixes used in the streamer.
+
+    /// Additional prefixes used in the streamer.
     case calibre
+
+    /// New TDM Reservation Protocol
+    /// https://www.w3.org/community/reports/tdmrep/CG-FINAL-tdmrep-20240510/
+    case tdm
 
     var uri: String {
         switch self {
@@ -45,6 +52,8 @@ enum OPFVocabulary: String {
         case .calibre:
             // https://github.com/kovidgoyal/calibre/blob/3f903cbdd165e0d1c5c25eecb6eef2a998342230/src/calibre/ebooks/metadata/opf3.py#L170
             return "https://calibre-ebook.com"
+        case .tdm:
+            return "http://www.w3.org/ns/tdmrep#"
         }
     }
 
@@ -96,8 +105,8 @@ enum OPFVocabulary: String {
     /// > Reserved prefixes should not be overridden in the prefix attribute, but Reading Systems
     /// > must use such local overrides when encountered.
     /// http://www.idpf.org/epub/301/spec/epub-publications.html#sec-metadata-reserved-vocabs
-    static func prefixes(in document: Fuzi.XMLDocument) -> [String: String] {
-        document.definePrefix("opf", forNamespace: "http://www.idpf.org/2007/opf")
+    static func prefixes(in document: ReadiumFuzi.XMLDocument) -> [String: String] {
+        document.defineNamespace(.opf)
         guard let prefixAttribute = document.firstChild(xpath: "/opf:package")?.attr("prefix") else {
             return [:]
         }
@@ -128,7 +137,7 @@ struct OPFMeta {
     let id: String?
     /// ID of the metadata that is refined by this one, if any.
     let refines: String?
-    let element: Fuzi.XMLElement
+    let element: ReadiumFuzi.XMLElement
 }
 
 /// Represents a `link` tag in an OPF document.
@@ -139,19 +148,18 @@ struct OPFLink {
     let href: String
     /// ID of the metadata that is refined by this one, if any.
     let refines: String?
-    let element: Fuzi.XMLElement
+    let element: ReadiumFuzi.XMLElement
 }
 
 struct OPFMetaList {
-    private let document: Fuzi.XMLDocument
+    private let document: ReadiumFuzi.XMLDocument
     private let metas: [OPFMeta]
     private let links: [OPFLink]
 
-    init(document: Fuzi.XMLDocument) {
+    init(document: ReadiumFuzi.XMLDocument) {
         self.document = document
         let prefixes = OPFVocabulary.prefixes(in: document)
-        document.definePrefix("opf", forNamespace: "http://www.idpf.org/2007/opf")
-        document.definePrefix("dc", forNamespace: "http://purl.org/dc/elements/1.1/")
+        document.defineNamespaces(.opf, .dc)
 
         // Parses `<meta>` and `<dc:x>` tags in order of appearance.
         let root = "/opf:package/opf:metadata"
@@ -247,7 +255,7 @@ struct OPFMetaList {
 
     /// Returns the JSON representation of the unknown metadata
     /// (for RWPM's `Metadata.otherMetadata`)
-    var otherMetadata: [String: Any] {
+    var otherMetadata: [String: JSONValue] {
         var metadata: [String: NSMutableOrderedSet] = [:]
 
         for meta in metas {
@@ -261,14 +269,23 @@ struct OPFMetaList {
         }
 
         return metadata.compactMapValues { values in
-            switch values.count {
-            case 0:
+            func toJSONValue(_ value: Any) -> JSONValue? {
+                if let v = value as? String { return .string(v) }
+                if let v = value as? [String: JSONValue] { return .object(v) }
                 return nil
-            case 1:
-                return values[0]
-            default:
-                return values.array
             }
+
+            let jsonValues = values.array.compactMap(toJSONValue)
+
+            if jsonValues.isEmpty {
+                return nil
+            }
+
+            if jsonValues.count == 1 {
+                return jsonValues[0]
+            }
+
+            return .array(jsonValues)
         }
     }
 
@@ -281,9 +298,9 @@ struct OPFMetaList {
         if let id = meta.id {
             let refines = metas.filter { $0.refines == id }
             if !refines.isEmpty {
-                var value: [String: Any] = ["@value": meta.content]
+                var value: [String: JSONValue] = ["@value": .string(meta.content)]
                 for refine in refines {
-                    value[refine.vocabularyURI + refine.property] = refine.content
+                    value[refine.vocabularyURI + refine.property] = .string(refine.content)
                 }
                 return value
             }
@@ -294,15 +311,15 @@ struct OPFMetaList {
     /// List of properties that should not be added to `otherMetadata` because they are already
     /// consumed by the RWPM model.
     private let rwpmProperties: [OPFVocabulary: [String]] = [
-        .a11y: ["certifiedBy", "certifierCredential", "certifierReport"],
+        .a11y: ["certifiedBy", "certifierCredential", "certifierReport", "exemption"],
         .defaultMetadata: ["cover"],
         .dcterms: [
             "contributor", "creator", "date", "description", "identifier",
             "language", "modified", "publisher", "subject", "title",
             "conformsTo",
         ],
-        .media: ["duration"],
-        .rendition: ["flow", "layout", "orientation", "spread"],
+        .media: ["duration", "active-class", "playback-active-class", "narrator"],
+        .rendition: ["layout"],
         .schema: [
             "numberOfPages", "accessMode", "accessModeSufficient",
             "accessibilitySummary", "accessibilityFeature", "accessibilityHazard",

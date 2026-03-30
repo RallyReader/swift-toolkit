@@ -4,7 +4,7 @@
 # Swift Package Manager
 .build/
 .swiftpm/
-./Package.resolved
+Package.resolved
 
 # Carthage
 ./Carthage/
@@ -56,7 +56,10 @@ playground.xcworkspace
 ## IntelliJ
 out/
 
-/Readium.xcodeproj
-/Derived
-/node_modules
-/yarn.lock
+## Claude Code
+.claude
+CLAUDE.md
+
+# DocC generation
+.build-docs
+docs-site

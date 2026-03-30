@@ -1,15 +1,15 @@
 //
-//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Copyright 2026 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
 
 import Foundation
-import Fuzi
-import R2Shared
+import ReadiumFuzi
+import ReadiumShared
 
-// http://www.idpf.org/epub/30/spec/epub30-publications.html#title-type
-// the six basic values of the "title-type" property specified by EPUB 3:
+/// http://www.idpf.org/epub/30/spec/epub30-publications.html#title-type
+/// the six basic values of the "title-type" property specified by EPUB 3:
 public enum EPUBTitleType: String {
     case main
     case subtitle
@@ -19,74 +19,92 @@ public enum EPUBTitleType: String {
     case expanded
 }
 
-public enum OPFParserError: Error {
-    /// The Epub have no title. Title is mandatory.
-    case missingPublicationTitle
-    /// Smile resource couldn't be parsed.
-    case invalidSmilResource
-}
-
 /// EpubParser support class, able to parse the OPF package document.
 /// OPF: Open Packaging Format.
 final class OPFParser: Loggable {
+    /// Internal representation of a manifest item during parsing.
+    private struct ManifestItem {
+        let id: String
+        let link: Link
+        let fallbackId: String?
+        let mediaOverlayId: String?
+    }
+
     /// Relative path to the OPF in the EPUB container
-    private let basePath: String
+    private let baseURL: RelativeURL
 
     /// DOM representation of the OPF file.
-    private let document: Fuzi.XMLDocument
-
-    /// EPUB title which will be used as a fallback if we can't parse one. Title is mandatory in
-    /// RWPM.
-    private let fallbackTitle: String
+    private let document: ReadiumFuzi.XMLDocument
 
     /// iBooks Display Options XML file to use as a fallback for metadata.
     /// See https://github.com/readium/architecture/blob/master/streamer/parser/metadata.md#epub-2x-9
-    private let displayOptions: Fuzi.XMLDocument?
+    private let displayOptions: ReadiumFuzi.XMLDocument?
 
     /// List of metadata declared in the package.
     private let metas: OPFMetaList
 
     /// Encryption information, indexed by resource HREF.
-    private let encryptions: [String: Encryption]
+    private let encryptions: [RelativeURL: Encryption]
 
-    init(basePath: String, data: Data, fallbackTitle: String, displayOptionsData: Data? = nil, encryptions: [String: Encryption]) throws {
-        self.basePath = basePath
-        self.fallbackTitle = fallbackTitle
-        document = try Fuzi.XMLDocument(data: data)
-        document.definePrefix("opf", forNamespace: "http://www.idpf.org/2007/opf")
-        displayOptions = (displayOptionsData.map { try? Fuzi.XMLDocument(data: $0) }) ?? nil
+    init(baseURL: RelativeURL, data: Data, displayOptionsData: Data? = nil, encryptions: [RelativeURL: Encryption]) throws {
+        self.baseURL = baseURL
+        document = try ReadiumFuzi.XMLDocument(data: data)
+        document.defineNamespace(.opf)
+        displayOptions = (displayOptionsData.map { try? ReadiumFuzi.XMLDocument(data: $0) }) ?? nil
         metas = OPFMetaList(document: document)
         self.encryptions = encryptions
     }
 
-    convenience init(fetcher: Fetcher, opfHREF: String, fallbackTitle: String, encryptions: [String: Encryption] = [:]) throws {
-        try self.init(
-            basePath: opfHREF,
-            data: fetcher.readData(at: opfHREF),
-            fallbackTitle: fallbackTitle,
+    convenience init(container: Container, opfHREF: RelativeURL, encryptions: [RelativeURL: Encryption] = [:]) async throws {
+        guard let data = try? await container.readData(at: opfHREF) else {
+            throw EPUBParserError.missingFile(path: opfHREF.string)
+        }
+
+        try await self.init(
+            baseURL: opfHREF,
+            data: data,
             displayOptionsData: {
-                let iBooksPath = "/META-INF/com.apple.ibooks.display-options.xml"
-                let koboPath = "/META-INF/com.kobobooks.display-options.xml"
-                return (try? fetcher.readData(at: iBooksPath))
-                    ?? (try? fetcher.readData(at: koboPath))
-                    ?? nil
+                let iBooksHREF = AnyURL(string: "META-INF/com.apple.ibooks.display-options.xml")!
+                let koboHREF = AnyURL(string: "META-INF/com.kobobooks.display-options.xml")!
+                if let data = try? await container.readData(at: iBooksHREF) {
+                    return data
+                } else if let data = try? await container.readData(at: koboHREF) {
+                    return data
+                } else {
+                    return nil
+                }
             }(),
             encryptions: encryptions
         )
     }
 
+    struct Package {
+        let version: String
+        let metadata: Metadata
+        let readingOrder: [Link]
+        let resources: [Link]
+        let epub2Guide: [Link]
+    }
+
     /// Parse the OPF file of the EPUB container and return a `Publication`.
     /// It also complete the informations stored in the container.
-    func parsePublication() throws -> (version: String, metadata: Metadata, readingOrder: [Link], resources: [Link]) {
-        let links = parseLinks()
-        let (resources, readingOrder) = splitResourcesAndReadingOrderLinks(links)
-        let metadata = EPUBMetadataParser(document: document, fallbackTitle: fallbackTitle, displayOptions: displayOptions, metas: metas)
+    func parsePublication() throws -> Package {
+        let manifestItems = parseManifestItems()
+        let (resources, readingOrder) = splitResourcesAndReadingOrderLinks(manifestItems)
+        var metadata = try EPUBMetadataParser(document: document, displayOptions: displayOptions, metas: metas).parse()
 
-        return try (
+        // If all reading order items are bitmaps, we infer a Divina.
+        if readingOrder.allAreBitmap {
+            metadata.layout = .fixed
+            metadata.conformsTo.append(.divina)
+        }
+
+        return Package(
             version: parseEPUBVersion(),
-            metadata: metadata.parse(),
+            metadata: metadata,
             readingOrder: readingOrder,
-            resources: resources
+            resources: resources,
+            epub2Guide: parseEPUB2Guide()
         )
     }
 
@@ -97,8 +115,29 @@ final class OPFParser: Loggable {
         return document.firstChild(xpath: "/opf:package")?.attr("version") ?? defaultVersion
     }
 
-    /// Parses XML elements of the <Manifest> in the package.opf file as a list of `Link`.
-    private func parseLinks() -> [Link] {
+    /// Parses EPUB 2 <guide> element into a list of `Link`.
+    ///
+    /// https://idpf.org/epub/20/spec/OPF_2.0.1_draft.htm#TOC2.6
+    private func parseEPUB2Guide() -> [Link] {
+        document.xpath("/opf:package/opf:guide/opf:reference")
+            .compactMap { node -> Link? in
+                guard
+                    let relativeHref = node.attr("href").flatMap(RelativeURL.init(epubHREF:)),
+                    let href = baseURL.resolve(relativeHref)
+                else {
+                    return nil
+                }
+
+                return Link(
+                    href: href.string,
+                    title: node.attr("title")?.orNilIfBlank(),
+                    rel: node.attr("type").flatMap(LinkRelation.init(epub2Type:))
+                )
+            }
+    }
+
+    /// Parses XML elements of the <Manifest> in the package.opf file.
+    private func parseManifestItems() -> [ManifestItem] {
         // Read meta to see if any Link is referenced as the Cover.
         let coverId = metas["cover"].first?.content
 
@@ -120,49 +159,27 @@ final class OPFParser: Loggable {
 
             let isCover = (id == coverId)
 
-            guard let link = makeLink(manifestItem: manifestItem, spineItem: spineItems[id], isCover: isCover) else {
+            guard let item = makeManifestItem(id: id, manifestItem: manifestItem, spineItem: spineItems[id], isCover: isCover) else {
                 log(.warning, "Can't parse link with ID \(id)")
                 return nil
             }
 
-            return link
+            return item
         }
     }
 
-    /// Parses XML elements of the <spine> in the package.opf file.
-    /// They are only composed of an `idref` referencing one of the previously parsed resource (XML: idref -> id).
-    ///
-    /// - Parameter manifestLinks: The `Link` parsed in the manifest items.
-    /// - Returns: The `Link` in `resources` and in `readingOrder`, taken from the `manifestLinks`.
-    private func splitResourcesAndReadingOrderLinks(_ manifestLinks: [Link]) -> (resources: [Link], readingOrder: [Link]) {
-        var resources = manifestLinks
-        var readingOrder: [Link] = []
-
-        let spineItems = document.xpath("/opf:package/opf:spine/opf:itemref")
-        for item in spineItems {
-            // Find the `Link` that `idref` is referencing to from the `manifestLinks`.
-            guard let idref = item.attr("idref"),
-                  let index = resources.firstIndex(where: { $0.properties["id"] as? String == idref }),
-                  // Only linear items are added to the readingOrder.
-                  item.attr("linear")?.lowercased() != "no"
-            else {
-                continue
-            }
-
-            readingOrder.append(resources[index])
-            // `resources` should only contain the links that are not already in `readingOrder`.
-            resources.remove(at: index)
-        }
-
-        return (resources, readingOrder)
-    }
-
-    private func makeLink(manifestItem: Fuzi.XMLElement, spineItem: Fuzi.XMLElement?, isCover: Bool) -> Link? {
-        guard var href = manifestItem.attr("href")?.removingPercentEncoding else {
+    private func makeManifestItem(
+        id: String,
+        manifestItem: ReadiumFuzi.XMLElement,
+        spineItem: ReadiumFuzi.XMLElement?,
+        isCover: Bool
+    ) -> ManifestItem? {
+        guard
+            let relativeHref = manifestItem.attr("href").flatMap(RelativeURL.init(epubHREF:)),
+            let href = baseURL.resolve(relativeHref)?.normalized
+        else {
             return nil
         }
-
-        href = HREF(href, relativeTo: basePath).string
 
         // Merges the string properties found in the manifest and spine items.
         let stringProperties = "\(manifestItem.attr("properties") ?? "") \(spineItem?.attr("properties") ?? "")"
@@ -179,39 +196,92 @@ final class OPFParser: Loggable {
 
         var properties = parseStringProperties(stringProperties)
 
-        if let encryption = encryptions[href]?.json, !encryption.isEmpty {
-            properties["encrypted"] = encryption
+        if let encryption = encryptions[href]?.jsonObject, !encryption.isEmpty {
+            properties["encrypted"] = .object(encryption)
         }
 
-        let type = manifestItem.attr("media-type")
-        var duration: Double?
+        let duration = metas["duration", in: .media, refining: id]
+            .first
+            .flatMap { SMILParser.parseClockValue($0.content) }
 
-        if let id = manifestItem.attr("id") {
-            properties["id"] = id
-
-            // If the link references a SMIL resource, retrieves and fills its duration.
-            if MediaType.smil.matches(type), let durationMeta = metas["duration", in: .media, refining: id].first {
-                duration = Double(SMILParser.smilTimeToSeconds(durationMeta.content))
-            }
-        }
-
-        return Link(
-            href: href,
-            type: type,
+        let link = Link(
+            href: href.string,
+            mediaType: manifestItem.attr("media-type").flatMap { MediaType($0) },
             rels: rels,
             properties: Properties(properties),
             duration: duration
         )
+
+        return ManifestItem(
+            id: id,
+            link: link,
+            fallbackId: manifestItem.attr("fallback"),
+            mediaOverlayId: manifestItem.attr("media-overlay")
+        )
+    }
+
+    /// Parses XML elements of the spine in the package.opf file.
+    ///
+    /// They are only composed of an `idref` referencing one of the previously
+    /// parsed resource (XML: idref -> id).
+    ///
+    /// Handles image spine items with HTML fallbacks (and vice versa) by
+    /// putting the image in the reading order and the HTML in `alternates`.
+    /// This is because we prefer treating it as a Divina to render it.
+    ///
+    /// - Parameter manifestItems: The items parsed from the manifest.
+    /// - Returns: The `Link` in `resources` and in `readingOrder`.
+    private func splitResourcesAndReadingOrderLinks(_ manifestItems: [ManifestItem]) -> (resources: [Link], readingOrder: [Link]) {
+        var items = manifestItems
+        var readingOrder: [Link] = []
+
+        let spineItems = document.xpath("/opf:package/opf:spine/opf:itemref")
+        for spineItem in spineItems {
+            // Find the item that `idref` is referencing.
+            guard
+                let idref = spineItem.attr("idref"),
+                let index = items.firstIndex(where: { $0.id == idref }),
+                // Only linear items are added to the readingOrder.
+                spineItem.attr("linear")?.lowercased() != "no"
+            else {
+                continue
+            }
+
+            let item = items.remove(at: index)
+            var spineLink = item.link
+
+            // Resolve fallback: prefer bitmaps as primary to treat image-based
+            // EPUBs as Divina
+            if
+                let fallbackId = item.fallbackId,
+                let fallbackIndex = items.firstIndex(where: { $0.id == fallbackId })
+            {
+                let fallbackItem = items.remove(at: fallbackIndex)
+                spineLink = resolveFallbackChain(
+                    spineLink: spineLink,
+                    fallbackLink: fallbackItem.link
+                )
+            }
+
+            if
+                let mediaOverlayId = item.mediaOverlayId,
+                let mediaOverlayIndex = items.firstIndex(where: { $0.id == mediaOverlayId && $0.link.mediaType?.matches(.smil) == true })
+            {
+                let mediaOverlayItem = items.remove(at: mediaOverlayIndex)
+                spineLink.alternates.append(mediaOverlayItem.link)
+            }
+
+            readingOrder.append(spineLink)
+        }
+
+        let resources = items.map(\.link)
+        return (resources, readingOrder)
     }
 
     /// Parse string properties into an `otherProperties` dictionary.
-    private func parseStringProperties(_ properties: [String]) -> [String: Any] {
+    private func parseStringProperties(_ properties: [String]) -> [String: JSONValue] {
         var contains: [String] = []
-        var layout: EPUBLayout?
-        var orientation: Presentation.Orientation?
-        var overflow: Presentation.Overflow?
-        var page: Presentation.Page?
-        var spread: Presentation.Spread?
+        var page: Properties.Page?
 
         for property in properties {
             switch property {
@@ -235,62 +305,40 @@ final class OPFParser: Loggable {
                 page = .right
             case "page-spread-center", "rendition:page-spread-center":
                 page = .center
-            // Spread
-            case "rendition:spread-none", "rendition:spread-auto":
-                // If we don't qualify `.none` here it sets it to `nil`.
-                spread = Presentation.Spread.none
-            case "rendition:spread-landscape":
-                spread = .landscape
-            case "rendition:spread-portrait":
-                // `portrait` is deprecated and should fallback to `both`.
-                // See. https://readium.org/architecture/streamer/parser/metadata#epub-3x-11
-                spread = .both
-            case "rendition:spread-both":
-                spread = .both
-            // Layout
-            case "rendition:layout-reflowable":
-                layout = .reflowable
-            case "rendition:layout-pre-paginated":
-                layout = .fixed
-            // Orientation
-            case "rendition:orientation-auto":
-                orientation = .auto
-            case "rendition:orientation-landscape":
-                orientation = .landscape
-            case "rendition:orientation-portrait":
-                orientation = .portrait
-            // Rendition
-            case "rendition:flow-auto":
-                overflow = .auto
-            case "rendition:flow-paginated":
-                overflow = .paginated
-            case "rendition:flow-scrolled-continuous", "rendition:flow-scrolled-doc":
-                overflow = .scrolled
             default:
                 continue
             }
         }
 
-        var otherProperties: [String: Any] = [:]
+        var otherProperties: [String: JSONValue] = [:]
         if !contains.isEmpty {
-            otherProperties["contains"] = contains
+            otherProperties["contains"] = .array(contains.map { .string($0) })
         }
-        if let layout = layout {
-            otherProperties["layout"] = layout.rawValue
-        }
-        if let orientation = orientation {
-            otherProperties["orientation"] = orientation.rawValue
-        }
-        if let overflow = overflow {
-            otherProperties["overflow"] = overflow.rawValue
-        }
-        if let page = page {
-            otherProperties["page"] = page.rawValue
-        }
-        if let spread = spread {
-            otherProperties["spread"] = spread.rawValue
+        if let jsonPage = page?.jsonValue {
+            otherProperties["page"] = jsonPage
         }
 
         return otherProperties
+    }
+
+    /// Resolves which link should be primary vs alternate when a fallback is
+    /// present.
+    ///
+    /// We prefer bitmaps as primary to treat image-based EPUBs as Divina.
+    private func resolveFallbackChain(
+        spineLink: Link,
+        fallbackLink: Link
+    ) -> Link {
+        var link = spineLink
+        // If fallback is a bitmap and spine is HTML, swap them.
+        if spineLink.mediaType?.isHTML == true, fallbackLink.mediaType?.isBitmap == true {
+            link = fallbackLink
+            // Transfer spine properties (like page spread) to the image
+            link.properties = spineLink.properties
+            link.alternates = [spineLink]
+        } else {
+            link.alternates = [fallbackLink]
+        }
+        return link
     }
 }

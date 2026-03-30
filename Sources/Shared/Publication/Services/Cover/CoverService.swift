@@ -1,5 +1,5 @@
 //
-//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Copyright 2026 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
@@ -29,18 +29,18 @@ public protocol CoverService: PublicationService {
     ///
     /// If the cover is not a bitmap format (e.g. SVG), it will be scaled down to fit the screen
     /// using `UIScreen.main.bounds.size`.
-    var cover: UIImage? { get }
+    func cover() async -> ReadResult<UIImage?>
 
     /// Returns the publication cover as a bitmap, scaled down to fit the given `maxSize`.
     ///
     /// If the cover is not in a bitmap format (e.g. SVG), it is exported as a bitmap filling
     /// `maxSize`. The cover might be cached in memory for next calls.
-    func coverFitting(maxSize: CGSize) -> UIImage?
+    func coverFitting(maxSize: CGSize) async -> ReadResult<UIImage?>
 }
 
 public extension CoverService {
-    func coverFitting(maxSize: CGSize) -> UIImage? {
-        cover?.scaleToFit(maxSize: maxSize)
+    func coverFitting(maxSize: CGSize) async -> ReadResult<UIImage?> {
+        await cover().map { $0?.scaleToFit(maxSize: maxSize) }
     }
 }
 
@@ -48,27 +48,19 @@ public extension CoverService {
 
 public extension Publication {
     /// Returns the publication cover as a bitmap at its maximum size.
-    var cover: UIImage? {
-        warnIfMainThread()
-        return findService(CoverService.self)?.cover
-            ?? coverFromManifest()
+    func cover() async -> ReadResult<UIImage?> {
+        guard let service = findService(CoverService.self) else {
+            return .success(nil)
+        }
+        return await service.cover()
     }
 
     /// Returns the publication cover as a bitmap, scaled down to fit the given `maxSize`.
-    func coverFitting(maxSize: CGSize) -> UIImage? {
-        warnIfMainThread()
-        return findService(CoverService.self)?.coverFitting(maxSize: maxSize)
-            ?? coverFromManifest()?.scaleToFit(maxSize: maxSize)
-    }
-
-    /// Extracts the first valid cover from the manifest links with `cover` relation.
-    private func coverFromManifest() -> UIImage? {
-        for link in links(withRel: .cover) {
-            if let cover = try? get(link).read().map(UIImage.init).get() {
-                return cover
-            }
+    func coverFitting(maxSize: CGSize) async -> ReadResult<UIImage?> {
+        guard let service = findService(CoverService.self) else {
+            return .success(nil)
         }
-        return nil
+        return await service.coverFitting(maxSize: maxSize)
     }
 }
 

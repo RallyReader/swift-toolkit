@@ -1,11 +1,11 @@
 //
-//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Copyright 2026 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
 
 import Foundation
-import R2Shared
+import ReadiumShared
 
 public protocol HTMLFontFamilyDeclaration {
     /// Name of the font family.
@@ -19,19 +19,24 @@ public protocol HTMLFontFamilyDeclaration {
 
     /// Injects this font family declaration in the given `html` document.
     ///
-    /// Use `servingFile` to convert a file URL into an http one to make a local
-    /// file available to the web views.
-    func inject(in html: String, servingFile: (URL) throws -> URL) throws -> String
+    /// Use `servingFile` to convert a file URL into a URL accessible from the
+    /// web views.
+    func inject(in html: String, servingFile: (FileURL) throws -> any AbsoluteURL) throws -> String
 }
 
 /// A type-erasing `HTMLFontFamilyDeclaration` object
 public struct AnyHTMLFontFamilyDeclaration: HTMLFontFamilyDeclaration {
     private let _fontFamily: () -> FontFamily
     private let _alternates: () -> [FontFamily]
-    private let _inject: (String, (URL) throws -> URL) throws -> String
+    private let _inject: (String, (FileURL) throws -> any AbsoluteURL) throws -> String
 
-    public var fontFamily: FontFamily { _fontFamily() }
-    public var alternates: [FontFamily] { _alternates() }
+    public var fontFamily: FontFamily {
+        _fontFamily()
+    }
+
+    public var alternates: [FontFamily] {
+        _alternates()
+    }
 
     public init<T: HTMLFontFamilyDeclaration>(_ declaration: T) {
         _fontFamily = { declaration.fontFamily }
@@ -39,7 +44,7 @@ public struct AnyHTMLFontFamilyDeclaration: HTMLFontFamilyDeclaration {
         _inject = { try declaration.inject(in: $0, servingFile: $1) }
     }
 
-    public func inject(in html: String, servingFile: (URL) throws -> URL) throws -> String {
+    public func inject(in html: String, servingFile: (FileURL) throws -> any AbsoluteURL) throws -> String {
         try _inject(html, servingFile)
     }
 }
@@ -65,7 +70,7 @@ public struct CSSFontFamilyDeclaration: HTMLFontFamilyDeclaration {
         self.fontFaces = fontFaces
     }
 
-    public func inject(in html: String, servingFile: (URL) throws -> URL) throws -> String {
+    public func inject(in html: String, servingFile: (FileURL) throws -> any AbsoluteURL) throws -> String {
         var injections = try fontFaces.flatMap {
             try $0.injections(for: html, servingFile: servingFile)
         }
@@ -89,14 +94,14 @@ public struct CSSFontFace {
     ///
     /// `preload` indicates whether this source will be declared for preloading
     /// in the HTML using `<link rel="preload">`.
-    private typealias Source = (file: URL, preload: Bool)
+    private typealias Source = (file: FileURL, preload: Bool)
 
     public var style: CSSFontStyle?
     public var weight: CSSFontWeight?
     private var sources: [Source]
 
     public init(
-        file: URL,
+        file: FileURL,
         preload: Bool = false,
         style: CSSFontStyle? = nil,
         weight: CSSFontWeight? = nil
@@ -109,28 +114,30 @@ public struct CSSFontFace {
     /// Returns a new CSSFontFace after adding a linked source for this font
     /// face.
     ///
-    /// - Parameter preload: Indicates whether this source will be declared for
-    /// preloading in the HTML using `<link rel="preload">`.
-    public func addingSource(file: URL, preload: Bool = false) -> Self {
+    /// - Parameters:
+    ///   - file: The URL to the font file to be added as a source.
+    ///   - preload: Indicates whether this source will be declared for
+    ///     preloading in the HTML using `<link rel="preload">`.
+    public func addingSource(file: FileURL, preload: Bool = false) -> Self {
         var copy = self
         copy.sources.append((file, preload))
         return copy
     }
 
-    func injections(for html: String, servingFile: (URL) throws -> URL) throws -> [HTMLInjection] {
+    func injections(for html: String, servingFile: (FileURL) throws -> any AbsoluteURL) throws -> [HTMLInjection] {
         try sources
             .filter(\.preload)
             .map { source in
                 let file = try servingFile(source.file)
-                return .link(href: file.absoluteString, rel: "preload", as: "font", crossOrigin: "")
+                return .link(href: file.string, rel: "preload", as: "font", crossOrigin: "")
             }
     }
 
-    func css(for fontFamily: String, servingFile: (URL) throws -> URL) throws -> String {
+    func css(for fontFamily: String, servingFile: (FileURL) throws -> any AbsoluteURL) throws -> String {
         let urls = try sources.map { try servingFile($0.file) }
         var descriptors: [String: String] = [
             "font-family": "\"\(fontFamily)\"",
-            "src": urls.map { "url(\"\($0.absoluteString)\")" }.joined(separator: ", "),
+            "src": urls.map { "url(\"\($0.string)\")" }.joined(separator: ", "),
         ]
 
         if let style = style {

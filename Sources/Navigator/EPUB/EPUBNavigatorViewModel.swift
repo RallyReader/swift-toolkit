@@ -1,164 +1,113 @@
 //
-//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Copyright 2026 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
 
 import Foundation
-import R2Shared
+import ReadiumShared
 import UIKit
 
 protocol EPUBNavigatorViewModelDelegate: AnyObject {
     func epubNavigatorViewModel(_ viewModel: EPUBNavigatorViewModel, runScript script: String, in scope: EPUBScriptScope)
     func epubNavigatorViewModelInvalidatePaginationView(_ viewModel: EPUBNavigatorViewModel)
-    func epubNavigatorViewModel(_ viewModel: EPUBNavigatorViewModel, didFailToLoadResourceAt href: String, withError error: ResourceError)
+    func epubNavigatorViewModel(_ viewModel: EPUBNavigatorViewModel, didFailToLoadResourceAt href: RelativeURL, withError error: ReadError)
 }
 
 enum EPUBScriptScope {
     case currentResource
     case loadedResources
-    case resource(href: String)
+    case resource(href: AnyURL)
 }
 
-final class EPUBNavigatorViewModel: Loggable {
-    enum Error: Swift.Error {
-        case noHTTPServer
-    }
-
+@MainActor final class EPUBNavigatorViewModel: Loggable {
     let publication: Publication
     let config: EPUBNavigatorViewController.Configuration
     let editingActions: EditingActionsController
-    private let httpServer: HTTPServer?
-    private let publicationEndpoint: HTTPServerEndpoint?
-    private(set) var publicationBaseURL: URL!
-    let assetsURL: URL
+
+    /// The base URL for the publication resources.
+    private(set) var publicationBaseURL: AbsoluteURL!
+
+    /// The base URL for Readium assets (CSS, scripts, etc.) and fonts.
+    let assetsBaseURL: any AbsoluteURL
+
+    /// The server used to serve publication resources and static assets to
+    /// the web view.
+    let server: WebViewServer
+
+    /// Format sniffer used to infer the media type of resources served with
+    /// the `server`.
+    let formatSniffer: FormatSniffer
+
     weak var delegate: EPUBNavigatorViewModelDelegate?
 
-    let useLegacySettings: Bool
-
-    /// Local file URL associated to the HTTP URL used to serve the file on the
-    /// `httpServer`. This is used to serve custom font files, for example.
-    @Atomic private var servedFiles: [URL: URL] = [:]
+    let readingOrder: ReadingOrder
 
     convenience init(
         publication: Publication,
-        config: EPUBNavigatorViewController.Configuration,
-        httpServer: HTTPServer
-    ) throws {
-        let uuidEndpoint: HTTPServerEndpoint = UUID().uuidString
-        let publicationEndpoint: HTTPServerEndpoint?
-        if publication.baseURL != nil {
-            publicationEndpoint = nil
-        } else {
-            publicationEndpoint = uuidEndpoint
-        }
+        readingOrder: ReadingOrder,
+        config: EPUBNavigatorViewController.Configuration
+    ) {
+        let assetsDirectory = Bundle.module.resourceURL!.fileURL!
+            .appendingPath("Assets/Static", isDirectory: true)
 
-        // FIXME: Remove in Readium 3.0
-        // Serve the fonts under the /fonts endpoint as the Streamer's
-        // EPUBHTMLInjector is expecting it there.
-        if let fontsURL = Bundle.module.resourceURL?.appendingPathComponent("Assets/Static/fonts") {
-            try httpServer.serve(at: "fonts", contentsOf: fontsURL, failureHandler: nil)
-        }
+        let formatSniffer = DefaultFormatSniffer()
+        let server = WebViewServer(scheme: "readium", formatSniffer: formatSniffer)
 
-        try self.init(
+        // Serve static assets directory.
+        let assetsBaseURL = server.serve(directory: assetsDirectory, at: "assets")
+
+        self.init(
             publication: publication,
+            readingOrder: readingOrder,
             config: config,
-            httpServer: httpServer,
-            publicationEndpoint: publicationEndpoint,
-            assetsURL: httpServer.serve(
-                at: "readium",
-                contentsOf: Bundle.module.resourceURL!.appendingPathComponent("Assets/Static"),
-                failureHandler: nil
-            ),
-            useLegacySettings: false
+            server: server,
+            assetsBaseURL: assetsBaseURL,
+            formatSniffer: formatSniffer
         )
 
         if let url = publication.baseURL {
+            // The publication already has an HTTP base URL (e.g. served
+            // remotely). Use it directly; the server only needs to serve
+            // assets.
             publicationBaseURL = url
         } else {
-            publicationBaseURL = try httpServer.serve(
-                at: uuidEndpoint, // serving the chapters endpoint
-                publication: publication,
-                failureHandler: { [weak self] request, error in
-                    guard let self = self, let href = request.href else {
-                        return
-                    }
-                    self.delegate?.epubNavigatorViewModel(self, didFailToLoadResourceAt: href, withError: error)
-                }
-            )
-        }
-        publicationBaseURL = URL(string: publicationBaseURL.absoluteString.addingSuffix("/"))!
-
-        if let endpoint = publicationEndpoint {
-            httpServer.transformResources(at: endpoint) { [weak self] in
-                self?.injectReadiumCSS(in: $0) ?? $0
+            // Serve publication resources.
+            publicationBaseURL = server.serve(at: UUID().uuidString) { [weak self] in
+                await self?.serve(href: $0)
             }
         }
     }
 
-    @available(*, deprecated, message: "See the 2.5.0 migration guide to migrate the Settings API")
-    convenience init(
-        publication: Publication,
-        config: EPUBNavigatorViewController.Configuration,
-        resourcesServer: ResourcesServer
-    ) {
-        guard let baseURL = publication.baseURL else {
-            preconditionFailure("No base URL provided for the publication. Add it to the HTTP server.")
-        }
-
-        publication.userProperties.properties = config.userSettings.userProperties.properties
-
-        self.init(
-            publication: publication,
-            config: config,
-            httpServer: nil,
-            publicationEndpoint: nil,
-            assetsURL: {
-                do {
-                    return try resourcesServer.serve(
-                        Bundle.module.resourceURL!.appendingPathComponent("Assets/Static"),
-                        at: "/r2-navigator/epub"
-                    )
-                } catch {
-                    EPUBNavigatorViewController.log(.error, error)
-                    return URL(string: "")!
-                }
-            }(),
-            useLegacySettings: true
-        )
-
-        publicationBaseURL = baseURL
-    }
-
     private init(
         publication: Publication,
+        readingOrder: ReadingOrder,
         config: EPUBNavigatorViewController.Configuration,
-        httpServer: HTTPServer?,
-        publicationEndpoint: HTTPServerEndpoint?,
-        assetsURL: URL,
-        useLegacySettings: Bool
+        server: WebViewServer,
+        assetsBaseURL: any AbsoluteURL,
+        formatSniffer: FormatSniffer
     ) {
         var config = config
 
-        if let fontsDir = Bundle.module.resourceURL?.appendingPathComponent("Assets/Static/fonts") {
+        if let fontsDir = Bundle.module.resourceURL?.fileURL?.appendingPath("Assets/Static/fonts", isDirectory: true) {
             config.fontFamilyDeclarations.append(
                 CSSFontFamilyDeclaration(
                     fontFamily: .openDyslexic,
                     fontFaces: [
                         CSSFontFace(
-                            file: fontsDir.appendingPathComponent("OpenDyslexic-Regular.otf"),
+                            file: fontsDir.appendingPath("OpenDyslexic-Regular.otf", isDirectory: false),
                             style: .normal, weight: .standard(.normal)
                         ),
                         CSSFontFace(
-                            file: fontsDir.appendingPathComponent("OpenDyslexic-Italic.otf"),
+                            file: fontsDir.appendingPath("OpenDyslexic-Italic.otf", isDirectory: false),
                             style: .italic, weight: .standard(.normal)
                         ),
                         CSSFontFace(
-                            file: fontsDir.appendingPathComponent("OpenDyslexic-Bold.otf"),
+                            file: fontsDir.appendingPath("OpenDyslexic-Bold.otf", isDirectory: false),
                             style: .normal, weight: .standard(.bold)
                         ),
                         CSSFontFace(
-                            file: fontsDir.appendingPathComponent("OpenDyslexic-BoldItalic.otf"),
+                            file: fontsDir.appendingPath("OpenDyslexic-BoldItalic.otf", isDirectory: false),
                             style: .italic, weight: .standard(.bold)
                         ),
                     ]
@@ -167,16 +116,15 @@ final class EPUBNavigatorViewModel: Loggable {
         }
 
         self.publication = publication
+        self.readingOrder = readingOrder
         self.config = config
         editingActions = EditingActionsController(
             actions: config.editingActions,
             publication: publication
         )
-        self.httpServer = httpServer
-        self.publicationEndpoint = publicationEndpoint
-        self.assetsURL = assetsURL
-        self.useLegacySettings = useLegacySettings
-        legacyReadingProgression = publication.metadata.effectiveReadingProgression
+        self.server = server
+        self.assetsBaseURL = assetsBaseURL
+        self.formatSniffer = formatSniffer
 
         preferences = config.preferences
         settings = EPUBSettings(publication: publication, config: config)
@@ -184,7 +132,7 @@ final class EPUBNavigatorViewModel: Loggable {
         css = ReadiumCSS(
             layout: CSSLayout(),
             rsProperties: config.readiumCSSRSProperties,
-            baseURL: assetsURL.appendingPathComponent("/readium-css/"),
+            baseURL: assetsBaseURL.appendingPath("readium-css", isDirectory: true),
             fontFamilyDeclarations: config.fontFamilyDeclarations
         )
 
@@ -200,28 +148,10 @@ final class EPUBNavigatorViewModel: Loggable {
 
     deinit {
         NotificationCenter.default.removeObserver(self)
-
-        if let endpoint = publicationEndpoint {
-            httpServer?.remove(at: endpoint)
-        }
     }
 
-    func url(to link: Link) -> URL? {
+    func url(to link: Link) -> AnyURL {
         link.url(relativeTo: publicationBaseURL)
-    }
-
-    private func serveFile(at file: URL, baseEndpoint: HTTPServerEndpoint) throws -> URL {
-        if let url = servedFiles[file] {
-            return url
-        }
-
-        guard let httpServer = httpServer else {
-            throw Error.noHTTPServer
-        }
-        let endpoint = baseEndpoint.addingSuffix("/") + file.lastPathComponent
-        let url = try httpServer.serve(at: endpoint, contentsOf: file, failureHandler: nil)
-        $servedFiles.write { $0[file] = url }
-        return url
     }
 
     private var needsInvalidatePagination = false
@@ -234,6 +164,36 @@ final class EPUBNavigatorViewModel: Loggable {
             needsInvalidatePagination = false
             delegate?.epubNavigatorViewModelInvalidatePaginationView(self)
         }
+    }
+
+    // MARK: - Web View Server
+
+    private func serve(href: RelativeURL) async -> (Resource, MediaType)? {
+        guard var resource = publication.get(href) else {
+            return nil
+        }
+        let mediaType = await resolveMediaType(for: resource, at: href)
+        resource = injectReadiumCSS(in: resource, at: href)
+        return (resource, mediaType)
+    }
+
+    /// Resolves the media type to use to serve the given `resource`.
+    ///
+    /// The media type declared in the manifest takes precedence, before falling
+    /// back on the `Resource` properties and sniffing the `href`.
+    ///
+    /// The manifest takes precedence because a file with a `.xml` extension
+    /// might be declared as `application/xhtml+xml` in the OPF.
+    private func resolveMediaType(for resource: Resource, at href: RelativeURL) async -> MediaType {
+        if let mediaType = publication.linkWithHREF(href)?.mediaType {
+            return mediaType
+        }
+        if let mediaType = await resource.properties().getOrNil()?.mediaType {
+            return mediaType
+        }
+
+        return href.pathExtension.flatMap { formatSniffer.sniffHints(.init(fileExtension: $0))?.mediaType }
+            ?? .binary
     }
 
     // MARK: - User preferences
@@ -266,6 +226,8 @@ final class EPUBNavigatorViewModel: Loggable {
                 || oldSettings.verticalText != newSettings.verticalText
                 || oldSettings.scroll != newSettings.scroll
                 || oldSettings.spread != newSettings.spread
+                || oldSettings.fit != newSettings.fit
+                || oldSettings.offsetFirstPage != newSettings.offsetFirstPage
 
         // We don't commit the CSS changes if we invalidate the pagination, as
         // the resources will be reloaded anyway.
@@ -285,41 +247,27 @@ final class EPUBNavigatorViewModel: Loggable {
     }
 
     var readingProgression: ReadingProgression {
-        useLegacySettings
-            ? (ReadingProgression(legacyReadingProgression) ?? .ltr)
-            : settings.readingProgression
+        settings.readingProgression
     }
-
-    var legacyReadingProgression: R2Shared.ReadingProgression
 
     var theme: Theme {
-        useLegacySettings ? legacyTheme : settings.theme
-    }
-
-    private var legacyTheme: Theme {
-        guard
-            let appearance = config.userSettings.userProperties.getProperty(reference: ReadiumCSSReference.appearance.rawValue) as? Enumerable,
-            appearance.values.count > appearance.index
-        else {
-            return .light
-        }
-        let value = appearance.values[appearance.index]
-        switch value {
-        case "readium-night-on":
-            return .dark
-        case "readium-sepia-on":
-            return .sepia
-        default:
-            return .light
-        }
+        settings.theme
     }
 
     var scroll: Bool {
-        useLegacySettings ? legacyScroll : settings.scroll
+        settings.scroll
     }
 
-    private var legacyScroll: Bool {
-        (config.userSettings.userProperties.getProperty(reference: ReadiumCSSReference.scroll.rawValue) as? Switchable)?.on ?? false
+    var verticalText: Bool {
+        settings.verticalText
+    }
+
+    var spread: Spread {
+        settings.spread
+    }
+
+    var offsetFirstPage: Bool? {
+        settings.offsetFirstPage
     }
 
     // MARK: Spread
@@ -354,47 +302,40 @@ final class EPUBNavigatorViewModel: Loggable {
         }
     }
 
-    private var spread: Spread {
-        useLegacySettings ? legacySpread : settings.spread
-    }
-
-    private var legacySpread: Spread {
-        let columnCount = config.userSettings.userProperties.getProperty(reference: ReadiumCSSReference.columnCount.rawValue) as? Enumerable
-
-        switch columnCount?.index {
-        case 0:
-            return .auto
-        case 1:
-            return .never
-        case 2:
-            return .always
-        default:
-            return Spread(publication.metadata.presentation.spread) ?? .auto
-        }
-    }
-
     // MARK: - Readium CSS
 
     private var css: ReadiumCSS
+    private var servedFonts: [FileURL: AbsoluteURL] = [:]
 
-    private func serveFont(at file: URL) throws -> URL {
-        try serveFile(at: file, baseEndpoint: "custom-fonts/\(UUID().uuidString)")
-    }
-
-    func injectReadiumCSS(in resource: Resource) -> Resource {
-        let link = resource.link
+    func injectReadiumCSS<HREF: URLConvertible>(in resource: Resource, at href: HREF) -> Resource {
         guard
-            link.mediaType.isHTML,
-            publication.metadata.presentation.layout(of: link) == .reflowable
+            let link = publication.linkWithHREF(href),
+            link.mediaType?.isHTML == true,
+            publication.metadata.epubLayout == .reflowable
         else {
             return resource
         }
 
-        return resource.mapAsString { [self] content in
+        return resource.mapAsString { [weak self] content in
+            guard let self = self else {
+                return content
+            }
+
             do {
                 var content = try css.inject(in: content)
                 for ff in config.fontFamilyDeclarations {
-                    content = try ff.inject(in: content, servingFile: serveFont)
+                    content = try ff.inject(
+                        in: content,
+                        servingFile: { [server] file in
+                            if let url = self.servedFonts[file] {
+                                return url
+                            }
+                            let name = file.lastPathSegment ?? UUID().uuidString
+                            let url = server.serve(file: file, at: "assets/fonts/\(name)")
+                            self.servedFonts[file] = url
+                            return url
+                        }
+                    )
                 }
                 return content
             } catch {

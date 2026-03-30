@@ -1,11 +1,11 @@
 //
-//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Copyright 2026 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
 
 import Foundation
-import R2Shared
+import ReadiumShared
 
 /// A `Configurable` is a component with a set of `ConfigurableSettings`.
 public protocol Configurable {
@@ -67,7 +67,9 @@ public class AnyConfigurable<
         _editor = configurable.editor(of:)
     }
 
-    public var settings: Settings { _settings() }
+    public var settings: Settings {
+        _settings()
+    }
 
     public func submitPreferences(_ preferences: Preferences) {
         _submitPreferences(preferences)

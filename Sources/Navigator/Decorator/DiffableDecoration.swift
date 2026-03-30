@@ -1,30 +1,31 @@
 //
-//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Copyright 2026 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
 
 import DifferenceKit
 import Foundation
-import R2Shared
+import ReadiumShared
 
 struct DiffableDecoration: Hashable, Differentiable {
     let decoration: Decoration
-    var differenceIdentifier: Decoration.Id { decoration.id }
+    var differenceIdentifier: Decoration.Id {
+        decoration.id
+    }
 }
 
 enum DecorationChange {
     case add(Decoration)
-    case addEnhanced(Decoration)
     case remove(Decoration.Id)
     case update(Decoration)
 }
 
 extension Array where Element == DiffableDecoration {
-    func changesByHREF(from source: [DiffableDecoration], enhanced: Bool) -> [String: [DecorationChange]] {
+    func changesByHREF(from source: [DiffableDecoration]) -> [AnyURL: [DecorationChange]] {
         let changeset = StagedChangeset(source: source, target: self)
 
-        var changes: [String: [DecorationChange]] = [:]
+        var changes: [AnyURL: [DecorationChange]] = [:]
 
         func register(_ change: DecorationChange, at locator: Locator) {
             var resourceChanges: [DecorationChange] = changes[locator.href] ?? []
@@ -39,7 +40,7 @@ extension Array where Element == DiffableDecoration {
             }
             for inserted in change.elementInserted {
                 let decoration = self[inserted.element].decoration
-                register(enhanced ? .addEnhanced(decoration) : .add(decoration), at: decoration.locator)
+                register(.add(decoration), at: decoration.locator)
             }
             for updated in change.elementUpdated {
                 let decoration = self[updated.element].decoration

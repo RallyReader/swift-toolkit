@@ -26,14 +26,13 @@ clean:
 	@rm -rf Pods
 	@rm -rf TestApp.xcodeproj
 	@rm -rf TestApp.xcworkspace
+	@rm -rf TestApp.xctestplan
 	@rm -rf R2LCPClient
 
 spm: clean
 ifdef lcp
 	@cp Integrations/SPM/project+lcp.yml project.yml
 	curl --create-dirs --output R2LCPClient/Package.swift "$(lcp)"
-	# Downgrades the SPM version to work with Xcode 12.4
-	@sed -i '' -e 's/5.5/5.3.0/g' R2LCPClient/Package.swift
 else
 	@cp Integrations/SPM/project.yml .
 endif
@@ -79,12 +78,11 @@ dev: clean
 ifdef lcp
 	@cp Integrations/Local/project+lcp.yml project.yml
 	curl --create-dirs --output R2LCPClient/Package.swift "$(lcp)"
-	# Downgrades the SPM version to work with Xcode 12.4
-	@sed -i '' -e 's/5.5/5.3.0/g' R2LCPClient/Package.swift
 else
 	@cp Integrations/Local/project.yml .
 endif
-	xcodegen generate
 	@cp -r Integrations/Local/TestApp.xcworkspace .
+	@cp -r Integrations/Local/TestApp.xctestplan .
+	xcodegen generate
 	@echo "\nopen TestApp.xcworkspace"
 

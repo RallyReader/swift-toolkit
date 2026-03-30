@@ -1,5 +1,5 @@
 //
-//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Copyright 2026 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
@@ -16,7 +16,8 @@ import ReadiumInternal
 /// These properties are nullable to avoid having default values when it doesn't make sense for a
 /// given `Publication`. If a navigator needs a default value when not specified,
 /// `Presentation.defaultX` and `Presentation.X.default` can be used.
-public struct Presentation: Equatable {
+@available(*, unavailable, message: "This was removed from RWPM. You can still use the EPUB extensibility to access the original values.")
+public struct Presentation: Equatable, JSONValueDecodable, JSONObjectEncodable {
     /// Specifies whether or not the parts of a linked resource that flow out of the viewport are
     /// clipped.
     public let clipped: Bool?
@@ -52,45 +53,37 @@ public struct Presentation: Equatable {
         self.layout = layout
     }
 
-    public init(json: Any?, warnings: WarningLogger? = nil) throws {
-        guard json != nil else {
+    public init?<T: JSONValueEncodable>(json: T?, warnings: WarningLogger?) throws {
+        guard let json = json?.jsonValue else {
             self.init()
             return
         }
-        guard let jsonObject = json as? [String: Any] else {
+        guard let jsonObject = json.object else {
             warnings?.log("Invalid JSON object", model: Self.self, source: json)
             throw JSONError.parsing(Self.self)
         }
 
         self.init(
-            clipped: jsonObject["clipped"] as? Bool,
-            continuous: jsonObject["continuous"] as? Bool,
-            fit: parseRaw(jsonObject["fit"]),
-            orientation: parseRaw(jsonObject["orientation"]),
-            overflow: parseRaw(jsonObject["overflow"]),
-            spread: parseRaw(jsonObject["spread"]),
-            layout: parseRaw(jsonObject["layout"])
+            clipped: jsonObject["clipped"]?.bool,
+            continuous: jsonObject["continuous"]?.bool,
+            fit: jsonObject["fit"]?.decode(),
+            orientation: jsonObject["orientation"]?.decode(),
+            overflow: jsonObject["overflow"]?.decode(),
+            spread: jsonObject["spread"]?.decode(),
+            layout: jsonObject["layout"]?.decode()
         )
     }
 
-    public var json: [String: Any] {
-        makeJSON([
-            "clipped": encodeIfNotNil(clipped),
-            "continuous": encodeIfNotNil(continuous),
-            "fit": encodeRawIfNotNil(fit),
-            "orientation": encodeRawIfNotNil(orientation),
-            "overflow": encodeRawIfNotNil(overflow),
-            "spread": encodeRawIfNotNil(spread),
-            "layout": encodeRawIfNotNil(layout),
+    public var jsonObject: [String: JSONValue] {
+        .init([
+            "clipped": clipped,
+            "continuous": continuous,
+            "fit": fit?.rawValue,
+            "orientation": orientation?.rawValue,
+            "overflow": overflow?.rawValue,
+            "spread": spread?.rawValue,
+            "layout": layout?.rawValue,
         ])
-    }
-
-    /// Determines the layout of the given resource in this publication.
-    /// Default layout is reflowable.
-    public func layout(of link: Link) -> EPUBLayout {
-        link.properties.layout
-            ?? layout
-            ?? .reflowable
     }
 
     /// Suggested method for constraining a resource inside the viewport.
@@ -119,9 +112,6 @@ public struct Presentation: Equatable {
         case scrolled
         /// The User Agent can decide how overflow should be handled.
         case auto
-
-        @available(*, unavailable, message: "Use `Presentation.continuous` instead")
-        static let scrolledContinuous: Overflow = .scrolled
     }
 
     /// Indicates how the linked resource should be displayed in a reading environment that

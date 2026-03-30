@@ -1,5 +1,5 @@
 //
-//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Copyright 2026 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
@@ -19,12 +19,16 @@ public protocol LCPAuthenticating {
     ///   - reason: Reason why the passphrase is requested. It should be used to prompt the user.
     ///   - allowUserInteraction: Indicates whether the user can be prompted for their passphrase.
     ///     If your implementation requires it and `allowUserInteraction` is false, terminate
-    ///     quickly by sending `nil` to the completion block.
+    ///     quickly by returning `nil`.
     ///   - sender: Free object that can be used by reading apps to give some UX context when
     ///     presenting dialogs. For example, the host `UIViewController`.
-    ///   - completion: Used to return the retrieved passphrase. If the user cancelled, send nil.
-    ///     The passphrase may be already hashed.
-    func retrievePassphrase(for license: LCPAuthenticatedLicense, reason: LCPAuthenticationReason, allowUserInteraction: Bool, sender: Any?, completion: @escaping (String?) -> Void)
+    @MainActor
+    func retrievePassphrase(
+        for license: LCPAuthenticatedLicense,
+        reason: LCPAuthenticationReason,
+        allowUserInteraction: Bool,
+        sender: Any?
+    ) async -> String?
 }
 
 public enum LCPAuthenticationReason {
@@ -62,8 +66,4 @@ public struct LCPAuthenticatedLicense {
 
     /// License Document being opened.
     public let document: LicenseDocument
-
-    init(document: LicenseDocument) {
-        self.document = document
-    }
 }

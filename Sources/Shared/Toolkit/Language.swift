@@ -1,12 +1,12 @@
 //
-//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Copyright 2026 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
 
 import Foundation
 
-public struct Language: Hashable {
+public struct Language: Hashable, Sendable, JSONValueDecodable, JSONValueEncodable {
     public static var current: Language {
         Language(locale: Locale.current)
     }
@@ -16,7 +16,7 @@ public struct Language: Hashable {
         Locale.availableIdentifiers
             .map { Language(code: .bcp47($0)) }
 
-    public enum Code: Hashable {
+    public enum Code: Hashable, Sendable {
         case bcp47(String)
 
         public var bcp47: String {
@@ -33,7 +33,29 @@ public struct Language: Hashable {
 
     public let code: Code
 
-    public var locale: Locale { Locale(identifier: code.bcp47) }
+    public struct Region: Hashable, Sendable, ExpressibleByStringLiteral {
+        public let code: String
+
+        public init(code: String) {
+            self.code = code
+        }
+
+        public init(stringLiteral value: StringLiteralType) {
+            self.init(code: value)
+        }
+
+        public func localizedName(in targetLocale: Locale = Locale.current) -> String? {
+            targetLocale.localizedString(forRegionCode: code)
+        }
+    }
+
+    public var region: Region? {
+        locale.regionCode.flatMap { Region(code: $0) }
+    }
+
+    public var locale: Locale {
+        Locale(identifier: code.bcp47)
+    }
 
     public func localizedDescription(in locale: Locale = Locale.current) -> String {
         locale.localizedString(forIdentifier: code.bcp47)
@@ -56,8 +78,19 @@ public struct Language: Hashable {
         self.init(code: .bcp47(locale.identifier))
     }
 
+    public init?<T: JSONValueEncodable>(json: T?, warnings: (any WarningLogger)?) throws {
+        guard let code = json?.jsonValue.string else {
+            return nil
+        }
+        self.init(code: .bcp47(code))
+    }
+
     public func removingRegion() -> Language {
         Language(code: code.removingRegion())
+    }
+
+    public var jsonValue: JSONValue {
+        .string(code.bcp47)
     }
 }
 

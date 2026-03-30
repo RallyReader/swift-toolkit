@@ -1,10 +1,10 @@
 //
-//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Copyright 2026 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
 
-@testable import R2Shared
+@testable import ReadiumShared
 import XCTest
 
 class PropertiesOPDSTests: XCTestCase {
@@ -32,7 +32,7 @@ class PropertiesOPDSTests: XCTestCase {
         let sut = Properties(["price": [
             "currency": "EUR",
             "value": 3.65,
-        ] as [String: Any]])
+        ]])
 
         XCTAssertEqual(sut.price, OPDSPrice(currency: "EUR", value: 3.65))
     }
@@ -103,7 +103,7 @@ class PropertiesOPDSTests: XCTestCase {
         ]])
         XCTAssertEqual(sut.authenticate, Link(
             href: "https://example.com/authentication.json",
-            type: "application/opds-authentication+json"
+            mediaType: .opdsAuthentication
         ))
     }
 

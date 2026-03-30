@@ -1,11 +1,11 @@
 //
-//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Copyright 2026 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
 
 import Foundation
-import R2Shared
+import ReadiumShared
 
 /// Setting values of the `EPUBNavigatorViewController`.
 ///
@@ -13,6 +13,7 @@ import R2Shared
 public struct EPUBSettings: ConfigurableSettings {
     public var backgroundColor: Color?
     public var columnCount: ColumnCount
+    public var fit: Fit
     public var fontFamily: FontFamily?
     public var fontSize: Double
     public var fontWeight: Double?
@@ -22,6 +23,7 @@ public struct EPUBSettings: ConfigurableSettings {
     public var letterSpacing: Double?
     public var ligatures: Bool?
     public var lineHeight: Double?
+    public var offsetFirstPage: Bool?
     public var pageMargins: Double
     public var paragraphIndent: Double?
     public var paragraphSpacing: Double?
@@ -46,6 +48,7 @@ public struct EPUBSettings: ConfigurableSettings {
     public init(
         backgroundColor: Color?,
         columnCount: ColumnCount,
+        fit: Fit,
         fontFamily: FontFamily?,
         fontSize: Double,
         fontWeight: Double?,
@@ -55,6 +58,7 @@ public struct EPUBSettings: ConfigurableSettings {
         letterSpacing: Double?,
         ligatures: Bool?,
         lineHeight: Double?,
+        offsetFirstPage: Bool?,
         pageMargins: Double,
         paragraphIndent: Double?,
         paragraphSpacing: Double?,
@@ -72,6 +76,7 @@ public struct EPUBSettings: ConfigurableSettings {
     ) {
         self.backgroundColor = backgroundColor
         self.columnCount = columnCount
+        self.fit = fit
         self.fontFamily = fontFamily
         self.fontSize = fontSize
         self.fontWeight = fontWeight
@@ -81,6 +86,7 @@ public struct EPUBSettings: ConfigurableSettings {
         self.letterSpacing = letterSpacing
         self.ligatures = ligatures
         self.lineHeight = lineHeight
+        self.offsetFirstPage = offsetFirstPage
         self.pageMargins = pageMargins
         self.paragraphIndent = paragraphIndent
         self.paragraphSpacing = paragraphSpacing
@@ -124,10 +130,23 @@ public struct EPUBSettings: ConfigurableSettings {
             ?? language?.verticalText(for: readingProgression)
             ?? false
 
+        var scroll = preferences.scroll
+            ?? defaults.scroll
+            ?? false
+
+        // We disable pagination with vertical text, because CSS columns don't support it properly.
+        // See https://github.com/readium/swift-toolkit/discussions/370
+        if verticalText {
+            scroll = true
+        }
+
         self.init(
             backgroundColor: preferences.backgroundColor,
             columnCount: preferences.columnCount
                 ?? defaults.columnCount
+                ?? .auto,
+            fit: preferences.fit
+                ?? defaults.fit
                 ?? .auto,
             fontFamily: preferences.fontFamily,
             fontSize: preferences.fontSize
@@ -146,6 +165,8 @@ public struct EPUBSettings: ConfigurableSettings {
                 ?? defaults.ligatures,
             lineHeight: preferences.lineHeight
                 ?? defaults.lineHeight,
+            offsetFirstPage: preferences.offsetFirstPage
+                ?? defaults.offsetFirstPage,
             pageMargins: preferences.pageMargins
                 ?? defaults.pageMargins
                 ?? 1.0,
@@ -157,11 +178,8 @@ public struct EPUBSettings: ConfigurableSettings {
                 ?? defaults.publisherStyles
                 ?? true,
             readingProgression: readingProgression,
-            scroll: preferences.scroll
-                ?? defaults.scroll
-                ?? false,
+            scroll: scroll,
             spread: preferences.spread
-                ?? Spread(metadata.presentation.spread)
                 ?? defaults.spread
                 ?? .auto,
             textAlign: preferences.textAlign
@@ -189,6 +207,7 @@ public struct EPUBSettings: ConfigurableSettings {
 /// See `EPUBPreferences`.
 public struct EPUBDefaults {
     public var columnCount: ColumnCount?
+    public var fit: Fit?
     public var fontSize: Double?
     public var fontWeight: Double?
     public var hyphens: Bool?
@@ -197,6 +216,7 @@ public struct EPUBDefaults {
     public var letterSpacing: Double?
     public var ligatures: Bool?
     public var lineHeight: Double?
+    public var offsetFirstPage: Bool?
     public var pageMargins: Double?
     public var paragraphIndent: Double?
     public var paragraphSpacing: Double?
@@ -211,6 +231,7 @@ public struct EPUBDefaults {
 
     public init(
         columnCount: ColumnCount? = nil,
+        fit: Fit? = nil,
         fontSize: Double? = nil,
         fontWeight: Double? = nil,
         hyphens: Bool? = nil,
@@ -219,6 +240,7 @@ public struct EPUBDefaults {
         letterSpacing: Double? = nil,
         ligatures: Bool? = nil,
         lineHeight: Double? = nil,
+        offsetFirstPage: Bool? = nil,
         pageMargins: Double? = nil,
         paragraphIndent: Double? = nil,
         paragraphSpacing: Double? = nil,
@@ -232,6 +254,7 @@ public struct EPUBDefaults {
         wordSpacing: Double? = nil
     ) {
         self.columnCount = columnCount
+        self.fit = fit
         self.fontSize = fontSize
         self.fontWeight = fontWeight
         self.hyphens = hyphens
@@ -240,6 +263,7 @@ public struct EPUBDefaults {
         self.letterSpacing = letterSpacing
         self.ligatures = ligatures
         self.lineHeight = lineHeight
+        self.offsetFirstPage = offsetFirstPage
         self.pageMargins = pageMargins
         self.paragraphIndent = paragraphIndent
         self.paragraphSpacing = paragraphSpacing

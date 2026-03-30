@@ -1,24 +1,24 @@
 //
-//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Copyright 2026 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
 
 import Foundation
-import Fuzi
-import R2Shared
+import ReadiumFuzi
+import ReadiumShared
 
 public enum OPDS1ParserError: Error {
-    // The title is missing from the feed.
+    /// The title is missing from the feed.
     case missingTitle
-    // Root is not found
+    /// Root is not found
     case rootNotFound
 }
 
 public enum OPDSParserOpenSearchHelperError: Error {
-    // Search link not found in feed
+    /// Search link not found in feed
     case searchLinkNotFound
-    // OpenSearch document is invalid
+    /// OpenSearch document is invalid
     case searchDocumentIsInvalid
 }
 
@@ -28,14 +28,13 @@ struct MimeTypeParameters {
 }
 
 public class OPDS1Parser: Loggable {
-    static var feedURL: URL?
-
     /// Parse an OPDS feed or publication.
     /// Feed can only be v1 (XML).
-    /// - parameter url: The feed URL
+    /// - Parameters:
+    ///   - url: The feed URL.
+    ///   - completion: A closure called when the parsing is complete, returning the parsed data
+    ///     or an error if the operation failed.
     public static func parseURL(url: URL, completion: @escaping (ParseData?, Error?) -> Void) {
-        feedURL = url
-
         URLSession.shared.dataTask(with: url) { data, response, error in
             guard let data = data, let response = response else {
                 completion(nil, error ?? OPDSParserError.documentNotFound)
@@ -58,19 +57,17 @@ public class OPDS1Parser: Loggable {
     /// - parameter response: The response payload
     /// - Returns: The intermediate structure of type ParseData
     public static func parse(xmlData: Data, url: URL, response: URLResponse) throws -> ParseData {
-        feedURL = url
-
         var parseData = ParseData(url: url, response: response, version: .OPDS1)
 
         let xmlDocument = try XMLDocument(data: xmlData)
 
         if xmlDocument.root?.tag == "feed" {
             // Feed
-            parseData.feed = try? parse(document: xmlDocument)
+            parseData.feed = try? parse(document: xmlDocument, feedURL: url)
         } else if xmlDocument.root?.tag == "entry" {
             // Publication only
             do {
-                parseData.publication = try parseEntry(document: xmlDocument)
+                parseData.publication = try parseEntry(document: xmlDocument, feedURL: url)
             } catch {
                 log(.warning, "Failed to parse Publication at \(url)")
             }
@@ -85,10 +82,10 @@ public class OPDS1Parser: Loggable {
     /// Feed can only be v1 (XML).
     /// - parameter document: The XMLDocument data
     /// - Returns: The resulting Feed
-    public static func parse(document: Fuzi.XMLDocument) throws -> Feed {
-        document.definePrefix("thr", forNamespace: "http://purl.org/syndication/thread/1.0")
-        document.definePrefix("dcterms", forNamespace: "http://purl.org/dc/terms/")
-        document.definePrefix("opds", forNamespace: "http://opds-spec.org/2010/catalog")
+    private static func parse(document: ReadiumFuzi.XMLDocument, feedURL: URL) throws -> Feed {
+        document.defineNamespace(.thr)
+        document.defineNamespace(.dcterms)
+        document.defineNamespace(.opds)
 
         guard let root = document.root else {
             throw OPDS1ParserError.rootNotFound
@@ -98,6 +95,8 @@ public class OPDS1Parser: Loggable {
             throw OPDS1ParserError.missingTitle
         }
         let feed = Feed(title: title)
+
+        feed.metadata.identifier = root.firstChild(tag: "id")?.stringValue
 
         if let tmpDate = root.firstChild(tag: "updated")?.stringValue,
            let date = tmpDate.dateFromISO8601
@@ -109,6 +108,13 @@ public class OPDS1Parser: Loggable {
         }
         if let itemsPerPage = root.firstChild(tag: "ItemsPerPage")?.stringValue {
             feed.metadata.itemsPerPage = Int(itemsPerPage)
+        }
+
+        if let iconValue = root.firstChild(tag: "icon")?.stringValue,
+           let href = URLHelper.getAbsolute(href: iconValue, base: feedURL)
+        {
+            let iconLink = Link(href: href, rel: .icon)
+            feed.links.append(iconLink)
         }
 
         for entry in root.children(tag: "entry") {
@@ -136,7 +142,7 @@ public class OPDS1Parser: Loggable {
             }
 
             if !isNavigation {
-                if let publication = parseEntry(entry: entry) {
+                if let publication = parseEntry(entry: entry, feedURL: feedURL) {
                     // Checking if this publication need to go into a group or in publications.
                     if let collectionLink = collectionLink {
                         addPublicationInGroup(feed, publication, collectionLink)
@@ -149,14 +155,14 @@ public class OPDS1Parser: Loggable {
                       let href = link.attr("href"),
                       let absoluteHref = URLHelper.getAbsolute(href: href, base: feedURL)
             {
-                var properties: [String: Any] = [:]
-                if let facetElementCount = link.attr("count").map(Int.init) {
-                    properties["numberOfItems"] = facetElementCount
+                var properties: [String: JSONValue] = [:]
+                if let facetElementCount = link.attr("count").flatMap(Int.init) {
+                    properties["numberOfItems"] = .integer(facetElementCount)
                 }
 
                 let newLink = Link(
                     href: absoluteHref,
-                    type: link.attr("type"),
+                    mediaType: link.attr("type").flatMap { MediaType($0) },
                     title: entry.firstChild(tag: "title")?.stringValue,
                     rel: link.attr("rel").map { LinkRelation($0) },
                     properties: .init(properties)
@@ -180,7 +186,7 @@ public class OPDS1Parser: Loggable {
             if let rel = link.attributes["rel"], !rel.isEmpty {
                 rels.append(.init(rel))
             }
-            var properties: [String: Any] = [:]
+            var properties: [String: JSONValue] = [:]
 
             let isFacet = rels.contains(.opdsFacet)
             if isFacet {
@@ -189,14 +195,14 @@ public class OPDS1Parser: Loggable {
                     rels.append(.self)
                 }
 
-                if let facetElementCount = link.attr("count").map(Int.init) {
-                    properties["numberOfItems"] = facetElementCount
+                if let facetElementCount = link.attr("count").flatMap(Int.init) {
+                    properties["numberOfItems"] = .integer(facetElementCount)
                 }
             }
 
             let newLink = Link(
                 href: absoluteHref,
-                type: link.attributes["type"],
+                mediaType: link.attributes["type"].flatMap { MediaType($0) },
                 title: link.attributes["title"],
                 rels: rels,
                 properties: .init(properties)
@@ -216,19 +222,25 @@ public class OPDS1Parser: Loggable {
 
     /// Parse an OPDS publication.
     /// Publication can only be v1 (XML).
-    /// - parameter document: The XMLDocument data
-    /// - Returns: The resulting Publication
-    public static func parseEntry(document: Fuzi.XMLDocument) throws -> Publication? {
+    /// - Parameters:
+    ///   - document: The XMLDocument data.
+    ///   - feedURL: The base URL of the feed, used to resolve relative links.
+    /// - Returns: The resulting `Publication`, or `nil` if the entry couldn't be parsed.
+    /// - Throws: An error if the XML parsing or validation fails.
+    public static func parseEntry(document: ReadiumFuzi.XMLDocument, feedURL: URL) throws -> Publication? {
         guard let root = document.root else {
             throw OPDS1ParserError.rootNotFound
         }
-        return parseEntry(entry: root)
+        return parseEntry(entry: root, feedURL: feedURL)
     }
 
     /// Fetch an Open Search template from an OPDS feed.
-    /// - parameter feed: The OPDS feed
+    /// - Parameters:
+    ///   - feed: The OPDS feed to search for the template.
+    ///   - completion: A closure called with the OpenSearch template as a `String` if found,
+    ///     or an `Error` if the fetch or parsing failed.
     public static func fetchOpenSearchTemplate(feed: Feed, completion: @escaping (String?, Error?) -> Void) {
-        guard let openSearchHref = feed.links.first(withRel: .search)?.href,
+        guard let openSearchHref = feed.links.firstWithRel(.search)?.href,
               let openSearchURL = URL(string: openSearchHref)
         else {
             completion(nil, OPDSParserOpenSearchHelperError.searchLinkNotFound)
@@ -254,10 +266,10 @@ public class OPDS1Parser: Loggable {
             }
             // The OpenSearch document may contain multiple Urls, and we need to find the closest matching one.
             // We match by mimetype and profile; if that fails, by mimetype; and if that fails, the first url is returned
-            var typeAndProfileMatch: Fuzi.XMLElement? = nil
-            var typeMatch: Fuzi.XMLElement? = nil
-            if let selfMimeType = feed.links.first(withRel: .self)?.type {
-                let selfMimeParams = parseMimeType(mimeTypeString: selfMimeType)
+            var typeAndProfileMatch: ReadiumFuzi.XMLElement? = nil
+            var typeMatch: ReadiumFuzi.XMLElement? = nil
+            if let selfMimeType = feed.links.firstWithRel(.self)?.mediaType {
+                let selfMimeParams = parseMimeType(mimeTypeString: selfMimeType.string)
                 for url in urls {
                     guard let urlMimeType = url.attributes["type"] else {
                         continue
@@ -297,8 +309,8 @@ public class OPDS1Parser: Loggable {
         return MimeTypeParameters(type: type, parameters: params)
     }
 
-    static func parseEntry(entry: Fuzi.XMLElement) -> Publication? {
-        // Shortcuts to get tag(s)' string value.
+    static func parseEntry(entry: ReadiumFuzi.XMLElement, feedURL: URL) -> Publication? {
+        /// Shortcuts to get tag(s)' string value.
         func tag(_ name: String) -> String? {
             entry.firstChild(tag: name)?.stringValue
         }
@@ -342,8 +354,8 @@ public class OPDS1Parser: Loggable {
             publishers: tags("publisher").map { Contributor(name: $0) },
             description: tag("content") ?? tag("summary"),
             otherMetadata: [
-                "rights": tags("rights").joined(separator: " "),
-            ]
+                "rights": .string(tags("rights").joined(separator: " ")),
+            ] as [String: JSONValue]
         )
 
         // Links.
@@ -354,18 +366,18 @@ public class OPDS1Parser: Loggable {
                 continue
             }
 
-            var properties: [String: Any] = [:]
-            if let price = parsePrice(link: linkElement)?.json, !price.isEmpty {
-                properties["price"] = price
+            var properties: [String: JSONValue] = [:]
+            if let price = parsePrice(link: linkElement) {
+                properties["price"] = .object(price.jsonObject)
             }
-            let indirectAcquisition = parseIndirectAcquisition(children: linkElement.children(tag: "indirectAcquisition")).json
+            let indirectAcquisition = parseIndirectAcquisition(children: linkElement.children(tag: "indirectAcquisition"))
             if !indirectAcquisition.isEmpty {
-                properties["indirectAcquisition"] = indirectAcquisition
+                properties["indirectAcquisition"] = indirectAcquisition.jsonValue
             }
 
             let link = Link(
                 href: absoluteHref,
-                type: linkElement.attributes["type"],
+                mediaType: linkElement.attributes["type"].flatMap { MediaType($0) },
                 title: linkElement.attributes["title"],
                 rel: linkElement.attributes["rel"].map { LinkRelation($0) },
                 properties: .init(properties)
@@ -456,7 +468,7 @@ public class OPDS1Parser: Loggable {
         }
     }
 
-    static func parseIndirectAcquisition(children: [Fuzi.XMLElement]) -> [OPDSAcquisition] {
+    static func parseIndirectAcquisition(children: [ReadiumFuzi.XMLElement]) -> [OPDSAcquisition] {
         children.compactMap { child in
             guard let type = child.attributes["type"] else {
                 return nil
@@ -470,7 +482,7 @@ public class OPDS1Parser: Loggable {
         }
     }
 
-    static func parsePrice(link: Fuzi.XMLElement) -> OPDSPrice? {
+    static func parsePrice(link: ReadiumFuzi.XMLElement) -> OPDSPrice? {
         guard let price = link.firstChild(tag: "price")?.stringValue,
               let value = Double(price),
               let currency = link.firstChild(tag: "price")?.attr("currencycode")

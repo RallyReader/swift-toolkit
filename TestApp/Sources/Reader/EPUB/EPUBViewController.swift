@@ -1,19 +1,18 @@
 //
-//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Copyright 2026 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
 
-import R2Navigator
-import R2Shared
-import ReadiumAdapterGCDWebServer
+import ReadiumNavigator
+import ReadiumShared
 import SwiftSoup
 import SwiftUI
 import UIKit
 import WebKit
 
 public extension FontFamily {
-    // Example of adding a custom font embedded in the application.
+    /// Example of adding a custom font embedded in the application.
     static let literata: FontFamily = "Literata"
 }
 
@@ -33,11 +32,11 @@ class EPUBViewController: VisualReaderViewController<EPUBNavigatorViewController
         var templates = HTMLDecorationTemplate.defaultTemplates()
         templates[.pageList] = .pageList
 
-        let resources = Bundle.main.resourceURL!
+        let resources = FileURL(url: Bundle.main.resourceURL!)!
         let navigator = try EPUBNavigatorViewController(
             publication: publication,
             initialLocation: locator,
-            config: .init(
+            config: EPUBNavigatorViewController.Configuration(
                 preferences: initialPreferences,
                 editingActions: EditingAction.defaultActions
                     .appending(EditingAction(
@@ -51,18 +50,17 @@ class EPUBViewController: VisualReaderViewController<EPUBNavigatorViewController
                         fontFaces: [
                             // Literata is a variable font family, so we can provide a font weight range.
                             CSSFontFace(
-                                file: resources.appendingPathComponent("Fonts/Literata-VariableFont_opsz,wght.ttf"),
+                                file: resources.appendingPath("Fonts/Literata-VariableFont_opsz,wght.ttf", isDirectory: false),
                                 style: .normal, weight: .variable(200 ... 900)
                             ),
                             CSSFontFace(
-                                file: resources.appendingPathComponent("Fonts/Literata-Italic-VariableFont_opsz,wght.ttf"),
+                                file: resources.appendingPath("Fonts/Literata-Italic-VariableFont_opsz,wght.ttf", isDirectory: false),
                                 style: .italic, weight: .variable(200 ... 900)
                             ),
                         ]
                     ).eraseToAnyHTMLFontFamilyDeclaration(),
                 ]
-            ),
-            httpServer: GCDHTTPServer.shared
+            )
         )
 
         self.preferencesStore = preferencesStore
@@ -156,7 +154,7 @@ class EPUBViewController: VisualReaderViewController<EPUBNavigatorViewController
 }
 
 extension EPUBViewController: EPUBNavigatorDelegate {
-    func navigator(_ navigator: Navigator, shouldNavigateToNoteAt link: R2Shared.Link, content: String, referrer: String?) -> Bool {
+    func navigator(_ navigator: Navigator, shouldNavigateToNoteAt link: ReadiumShared.Link, content: String, referrer: String?) -> Bool {
         presentFootnote(content: content, referrer: referrer)
     }
 }

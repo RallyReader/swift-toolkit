@@ -1,14 +1,14 @@
 //
-//  Copyright 2021 Readium Foundation. All rights reserved.
+//  Copyright 2025 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
 
 // Script used for the single spread wrapper HTML page for fixed layout resources.
 
-import { FixedPage } from "./fixed-page";
+import { FixedPage, PageType } from "./fixed-page";
 
-var page = FixedPage("page");
+var page = FixedPage("page", PageType.SINGLE);
 
 // Public API called from Swift.
 global.spread = {
@@ -30,7 +30,7 @@ global.spread = {
   },
 
   // Updates the available viewport to display the resources.
-  setViewport: function (viewportSize, safeAreaInsets) {
-    page.setViewport(viewportSize, safeAreaInsets);
+  setViewport: function (viewportSize, safeAreaInsets, fit) {
+    page.setViewport(viewportSize, safeAreaInsets, fit);
   },
 };

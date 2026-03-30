@@ -1,14 +1,12 @@
 //
-//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Copyright 2026 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
 
-import XCTest
-
-import R2Shared
-
 @testable import ReadiumOPDS
+import ReadiumShared
+import XCTest
 
 #if !SWIFT_PACKAGE
     extension Bundle {
@@ -46,15 +44,58 @@ class readium_opds1_1_test: XCTestCase {
     }
 
     func testMetadata() {
-        XCTAssert(feed!.metadata.title == "Unpopular Publications")
+        XCTAssert(feed?.metadata.identifier == "urn:uuid:433a5d6a-0b8c-4933-af65-4ca4f02763eb")
+        XCTAssert(feed?.metadata.title == "Unpopular Publications")
         // TODO: add more tests...
     }
 
-    func testLinks() {
-        XCTAssertEqual(feed.links.count, 4)
-        XCTAssertEqual(feed.links[0].rels, ["related"])
-        XCTAssertEqual(feed.links[1].type, "application/atom+xml;profile=opds-catalog;kind=acquisition")
-        XCTAssertEqual(feed.links[2].href, "http://test.com/opds-catalogs/root.xml")
+    func testLinks() throws {
+        XCTAssertEqual(feed.links.count, 5)
+
+        // Has a "related" link
+        let expectedRelatedLink = try Link(
+            href: "http://test.com/opds-catalogs/vampire.farming.xml",
+            mediaType: XCTUnwrap(MediaType("application/atom+xml;profile=opds-catalog;kind=acquisition")),
+            rels: ["related"]
+        )
+        let relatedLink = feed?.links.first { $0.rels.contains("related") }
+        XCTAssertEqual(relatedLink, expectedRelatedLink)
+
+        // Has a "self" link
+        let expectedSelfLink = try Link(
+            href: "http://test.com/opds-catalogs/unpopular.xml",
+            mediaType: XCTUnwrap(MediaType("application/atom+xml;profile=opds-catalog;kind=acquisition")),
+            rels: ["self"]
+        )
+        let selfLink = feed?.links.first { $0.rels.contains("self") }
+        XCTAssertEqual(selfLink, expectedSelfLink)
+
+        // Has a "start" link
+        let expectedStartLink = try Link(
+            href: "http://test.com/opds-catalogs/root.xml",
+            mediaType: XCTUnwrap(MediaType("application/atom+xml;profile=opds-catalog;kind=navigation")),
+            rels: ["start"]
+        )
+        let startLink = feed?.links.first { $0.rels.contains("start") }
+        XCTAssertEqual(startLink, expectedStartLink)
+
+        // Has an "up" link
+        let expectedUpLink = try Link(
+            href: "http://test.com/opds-catalogs/root.xml",
+            mediaType: XCTUnwrap(MediaType("application/atom+xml;profile=opds-catalog;kind=navigation")),
+            rels: ["up"]
+        )
+        let upLink = feed?.links.first { $0.rels.contains("up") }
+        XCTAssertEqual(upLink, expectedUpLink)
+
+        // Has an "icon" link
+        let expectedIconLink = Link(
+            href: "http://test.com/images/favicon.ico?t=1516986276",
+            rels: ["icon"]
+        )
+        let iconLink = feed?.links.first { $0.rels.contains("icon") }
+        XCTAssertEqual(iconLink, expectedIconLink)
+
         // TODO: add more tests...
     }
 

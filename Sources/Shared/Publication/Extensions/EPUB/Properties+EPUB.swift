@@ -1,5 +1,5 @@
 //
-//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Copyright 2026 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
@@ -19,11 +19,12 @@ public extension Properties {
     /// Identifies content contained in the linked resource, that cannot be strictly identified
     /// using a media type.
     var contains: [String] {
-        parseArray(otherProperties["contains"])
+        otherProperties[containsKey]?.decode() ?? []
     }
 
     /// Hint about the nature of the layout for the linked resources.
+    @available(*, unavailable, message: "This was removed from RWPM. You can still use the EPUB extensibility to access the original value.")
     var layout: EPUBLayout? {
-        parseRaw(otherProperties["layout"])
+        otherProperties[layoutKey]?.decode()
     }
 }

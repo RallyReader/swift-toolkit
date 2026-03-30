@@ -1,10 +1,10 @@
 //
-//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Copyright 2026 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
 
-@testable import R2Shared
+@testable import ReadiumShared
 import XCTest
 
 class OPDSPriceTests: XCTestCase {
@@ -13,7 +13,7 @@ class OPDSPriceTests: XCTestCase {
             try? OPDSPrice(json: [
                 "currency": "EUR",
                 "value": 4.65,
-            ] as [String: Any]),
+            ] as JSONValue),
             OPDSPrice(currency: "EUR", value: 4.65)
         )
     }
@@ -23,7 +23,7 @@ class OPDSPriceTests: XCTestCase {
     }
 
     func testParseJSONNil() {
-        XCTAssertNil(try OPDSPrice(json: nil))
+        XCTAssertNil(try OPDSPrice(json: nil as JSONValue?))
     }
 
     func testParseJSONRequiresCurrency() {
@@ -42,16 +42,16 @@ class OPDSPriceTests: XCTestCase {
         XCTAssertThrowsError(try OPDSPrice(json: [
             "currency": "EUR",
             "value": -20,
-        ] as [String: Any]))
+        ] as JSONValue))
     }
 
     func testGetJSON() {
-        AssertJSONEqual(
-            OPDSPrice(currency: "EUR", value: 4.65).json,
+        XCTAssertEqual(
+            OPDSPrice(currency: "EUR", value: 4.65).jsonObject,
             [
                 "currency": "EUR",
                 "value": 4.65,
-            ] as [String: Any]
+            ] as [String: JSONValue]
         )
     }
 }

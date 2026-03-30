@@ -1,5 +1,5 @@
 //
-//  Copyright 2024 Readium Foundation. All rights reserved.
+//  Copyright 2026 Readium Foundation. All rights reserved.
 //  Use of this source code is governed by the BSD-style license
 //  available in the top-level LICENSE file of the project.
 //
@@ -19,15 +19,15 @@ public extension Content {
     }
 
     /// Returns all the elements as a list.
-    func elements() -> [ContentElement] {
-        Array(sequence())
+    func elements() async -> [ContentElement] {
+        await sequence().reduce(into: [ContentElement]()) { $0.append($1) }
     }
 
     /// Extracts the full raw text, or returns null if no text content can be found.
     ///
     /// - Parameter separator: Separator to use between individual elements. Defaults to newline.
-    func text(separator: String = "\n") -> String? {
-        let text = elements()
+    func text(separator: String = "\n") async -> String? {
+        let text = await elements()
             .compactMap { ($0 as? TextualContentElement)?.text.takeIf { !$0.isEmpty } }
             .joined(separator: separator)
 
@@ -63,9 +63,13 @@ public struct AnyEquatableContentElement: Equatable, ContentElement {
         self.element = element
     }
 
-    public var locator: Locator { element.locator }
+    public var locator: Locator {
+        element.locator
+    }
 
-    public var attributes: [ContentAttribute] { element.attributes }
+    public var attributes: [ContentAttribute] {
+        element.attributes
+    }
 
     public func isEqualTo(_ other: ContentElement) -> Bool {
         element.isEqualTo(other)
@@ -85,7 +89,9 @@ public protocol TextualContentElement: ContentElement {
 }
 
 public extension TextualContentElement {
-    var text: String? { accessibilityLabel }
+    var text: String? {
+        accessibilityLabel
+    }
 }
 
 /// An element referencing an embedded external resource.
@@ -200,8 +206,13 @@ public struct TextContentElement: Hashable, TextualContentElement {
 ///
 /// The `V` phantom type is there to perform static type checking when requesting an attribute.
 public struct ContentAttributeKey<V>: Hashable {
-    public static var accessibilityLabel: ContentAttributeKey<String> { .init("accessibilityLabel") }
-    public static var language: ContentAttributeKey<Language> { .init("language") }
+    public static var accessibilityLabel: ContentAttributeKey<String> {
+        .init("accessibilityLabel")
+    }
+
+    public static var language: ContentAttributeKey<Language> {
+        .init("language")
+    }
 
     public let key: String
     public init(_ key: String) {
@@ -231,8 +242,13 @@ public protocol ContentAttributesHolder {
 }
 
 public extension ContentAttributesHolder {
-    var language: Language? { self[.language] }
-    var accessibilityLabel: String? { self[.accessibilityLabel] }
+    var language: Language? {
+        self[.language]
+    }
+
+    var accessibilityLabel: String? {
+        self[.accessibilityLabel]
+    }
 
     /// Gets the first attribute with the given `key`.
     subscript<T>(_ key: ContentAttributeKey<T>) -> T? {
@@ -265,37 +281,39 @@ public extension ContentAttributesHolder {
 /// Iterates through a list of `ContentElement` items.
 public protocol ContentIterator: AnyObject {
     /// Retrieves the next element, or nil if we reached the end.
-    func next() throws -> ContentElement?
+    func next() async throws -> ContentElement?
 
     /// Advances to the previous item and returns it, or null if we reached the beginning.
-    func previous() throws -> ContentElement?
+    func previous() async throws -> ContentElement?
 }
 
 /// Helper class to treat a `Content` as a `Sequence`.
-public class ContentSequence: Sequence {
+public class ContentSequence: AsyncSequence {
+    public typealias Element = ContentElement
+
     private let content: Content
 
     init(content: Content) {
         self.content = content
     }
 
-    public func makeIterator() -> ContentSequence.Iterator {
+    public func makeAsyncIterator() -> ContentSequence.Iterator {
         Iterator(iterator: content.iterator())
     }
 
-    public class Iterator: IteratorProtocol, Loggable {
+    public class Iterator: AsyncIteratorProtocol, Loggable {
         private let iterator: ContentIterator
 
         public init(iterator: ContentIterator) {
             self.iterator = iterator
         }
 
-        public func next() -> ContentElement? {
+        public func next() async -> ContentElement? {
             do {
-                return try iterator.next()
+                return try await iterator.next()
             } catch {
                 log(.warning, error)
-                return next()
+                return await next()
             }
         }
     }
