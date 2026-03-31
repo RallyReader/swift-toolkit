@@ -800,7 +800,7 @@ open class EPUBNavigatorViewController: InputObservableViewController,
     }
 
     public func getRectFromLocator(_ locator: Locator, convertRect: Bool = true, reset: Bool = false, cache: Bool = true, completion: @escaping (CGRect?) -> Void) {
-        guard let locatorJson = locator.jsonString else {
+        guard let locatorJson = try? locator.jsonString() else {
             completion(nil)
             return
         }
@@ -836,7 +836,7 @@ open class EPUBNavigatorViewController: InputObservableViewController,
         if let spreadView = loadedSpreadViewForHREF(href) {
             let script = "readium.calculateHorizontalPageRanges()"
             Task {
-                let result = await spreadView.evaluateScript(script, inHREF: href)
+                let result = await spreadView.evaluateScript(script, inHREF: href.anyURL)
                 var pages = [String]()
                 if case .success(let readiumResult) = result,
                    let json = readiumResult as? [String: String] {
@@ -858,11 +858,11 @@ open class EPUBNavigatorViewController: InputObservableViewController,
         if let spreadView = loadedSpreadViewForHREF(href) {
             let script = "readium.getFirstVisibleWordText()"
             Task {
-                let result = await spreadView.evaluateScript(script, inHREF: href)
+                let result = await spreadView.evaluateScript(script, inHREF: href.anyURL)
                 await MainActor.run {
                     if case .success(let readiumResult) = result,
                        let selection = readiumResult as? [String: Any],
-                       let text = try? Locator.Text(json: selection["text"]) {
+                       let text = try? Locator.Text(json: JSONValue(selection["text"]), warnings: nil) {
                         let locator = Locator(href: href, mediaType: .html, text: text)
                         completion(locator)
                     } else {
@@ -879,11 +879,11 @@ open class EPUBNavigatorViewController: InputObservableViewController,
         if let spreadView = loadedSpreadViewForHREF(href) {
             let script = "readium.getLastVisibleWordText()"
             Task {
-                let result = await spreadView.evaluateScript(script, inHREF: href)
+                let result = await spreadView.evaluateScript(script, inHREF: href.anyURL)
                 await MainActor.run {
                     if case .success(let readiumResult) = result,
                        let selection = readiumResult as? [String: Any],
-                       let text = try? Locator.Text(json: selection["text"]) {
+                       let text = try? Locator.Text(json: JSONValue(selection["text"]), warnings: nil) {
                         let locator = Locator(href: href, mediaType: .html, text: text)
                         completion(locator)
                     } else {
@@ -900,11 +900,11 @@ open class EPUBNavigatorViewController: InputObservableViewController,
         if let spreadView = loadedSpreadViewForHREF(href) {
             let script = "readium.getLastWordText()"
             Task {
-                let result = await spreadView.evaluateScript(script, inHREF: href)
+                let result = await spreadView.evaluateScript(script, inHREF: href.anyURL)
                 await MainActor.run {
                     if case .success(let readiumResult) = result,
                        let selection = readiumResult as? [String: Any],
-                       let text = try? Locator.Text(json: selection["text"]) {
+                       let text = try? Locator.Text(json: JSONValue(selection["text"]), warnings: nil) {
                         let locator = Locator(href: href, mediaType: .html, text: text)
                         completion(locator)
                     } else {
@@ -921,7 +921,7 @@ open class EPUBNavigatorViewController: InputObservableViewController,
         if let spreadView = loadedSpreadViewForHREF(href) {
             let script = "readium.getHtmlBodyTextContent()"
             Task {
-                let result = await spreadView.evaluateScript(script, inHREF: href)
+                let result = await spreadView.evaluateScript(script, inHREF: href.anyURL)
                 await MainActor.run {
                     if case .success(let readiumResult) = result {
                         completion(readiumResult as? String)
@@ -937,7 +937,7 @@ open class EPUBNavigatorViewController: InputObservableViewController,
 
     public func spreadHasFixedLayout<T: URLConvertible>(href: T) -> Bool? {
         if let spreadView = loadedSpreadViewForHREF(href) {
-            return spreadView.spread.layout == .fixed
+            return publication.metadata.layout == .fixed
         }
         return nil
     }
@@ -953,14 +953,15 @@ open class EPUBNavigatorViewController: InputObservableViewController,
     }
     
     public func scrollViewInsideSpreadView(forHREF href: String) -> UIScrollView? {
-        let spreadView = loadedSpreadView(forHREF: href)
+        let spreadView = AnyURL(string: href)
+            .flatMap { loadedSpreadViewForHREF($0) }
         return spreadView?.scrollView
     }
     
     public func allLoadedScrollViews() -> [UIScrollView] {
-        return paginationView.loadedViews.compactMap { _, view in
+        return paginationView?.loadedViews.compactMap { _, view in
             (view as? EPUBSpreadView)?.scrollView
-        }
+        } ?? []
     }
 
     // MARK: - SelectableNavigator
@@ -1096,8 +1097,10 @@ open class EPUBNavigatorViewController: InputObservableViewController,
         callbacks.append(onActivated)
         decorationRectsCallbacks[group] = callbacks
 
-        for (_, view) in paginationView.loadedViews {
-            (view as? EPUBSpreadView)?.evaluateScript("readium.getDecorations('\(group)').setActivable();")
+        for (_, view) in paginationView?.loadedViews ?? [:] {
+            Task {
+                _ = await (view as? EPUBSpreadView)?.evaluateScript("readium.getDecorations('\(group)').setActivable();")
+            }
         }
     }
 

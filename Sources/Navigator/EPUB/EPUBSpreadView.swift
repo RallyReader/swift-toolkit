@@ -384,7 +384,7 @@ class EPUBSpreadView: UIView, Loggable, PageView {
         guard
             let selection = body as? [String: Any],
             let href = selection["href"] as? String,
-            let text = try? Locator.Text(json: selection["text"]),
+            let text = try? Locator.Text(json: JSONValue(selection["text"]), warnings: nil),
             var frame = CGRect(json: selection["rect"])
         else {
             focusedResource = nil
@@ -393,7 +393,8 @@ class EPUBSpreadView: UIView, Loggable, PageView {
             return
         }
 
-        focusedResource = spread.links.first(withHREF: href)
+        focusedResource = AnyURL(string: href)
+            .flatMap { viewModel.readingOrder.firstIndexWithHREF($0) }
         frame.origin = convertPointToNavigatorSpace(frame.origin)
         delegate?.spreadView(self, selectionDidChange: text, frame: frame)
     }
