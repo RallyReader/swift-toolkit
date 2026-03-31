@@ -20,6 +20,20 @@ import {
 import { ResizeObserver as ResizeObserverPolyfill } from "@juggle/resize-observer";
 const ResizeObserver = window.ResizeObserver || ResizeObserverPolyfill;
 
+/**
+ * Returns the document body's writing mode.
+ */
+function getDocumentWritingMode() {
+  return getComputedStyle(document.body).writingMode;
+}
+
+/**
+ * Returns the closest element ancestor of the given node.
+ */
+function getContainingElement(node) {
+  return node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+}
+
 let styles = new Map();
 let groups = new Map();
 var lastGroupId = 0;
