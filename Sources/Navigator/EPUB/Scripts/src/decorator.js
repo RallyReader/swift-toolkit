@@ -14,6 +14,7 @@ import {
   logErrorMessage,
   rangeFromLocator,
   getOCRCorrectedRect,
+  getAllOCRCorrectedRects,
 } from "./utils";
 
 // Polyfill for iOS 13.3
@@ -591,9 +592,10 @@ export function DecorationGroup(groupId, groupName) {
         return;
       }
 
-      pageIndex = Math.floor(
-        (boundingRect.left + window.scrollX) / viewportWidth
-      ); // Calculate the page index
+      pageIndex = Math.max(
+        0,
+        Math.floor((boundingRect.left + window.scrollX) / viewportWidth)
+      );
     } catch (error) {
       logErrorMessage(`Error calculating page index: ${error.message}`);
       postMessageWithInvalidRect();
@@ -953,15 +955,39 @@ export function DecorationGroup(groupId, groupName) {
 
         log(`client rects: ${clientRects.length} for ${item.range}`);
 
-        // For single rect with text-overlay, use overlay position
-        // For multiple rects, use individual rect positions
-        let useOverlay = clientRects.length === 1 && ocrLayout;
+        if (ocrLayout && clientRects.length > 1) {
+          // Multi-rect OCR: get the corrected rect for each text-overlay
+          let ocrRects = getAllOCRCorrectedRects(item.range);
+          if (ocrRects && ocrRects.length > 0) {
+            for (let ocrRectItem of ocrRects) {
+              computedLeft = ocrRectItem.left;
+              computedTop = ocrRectItem.top;
+              computedWidth = `${ocrRectItem.width}px`;
+              computedHeight = `${ocrRectItem.height}px`;
+              rotationAngle = ocrRectItem.rotation;
 
-        for (let clientRect of clientRects) {
-          const line = elementTemplate.cloneNode(true);
-          line.style.setProperty("pointer-events", "none");
-          positionElement(line, clientRect, boundingRect, useOverlay);
-          itemContainer.append(line);
+              const line = elementTemplate.cloneNode(true);
+              line.style.setProperty("pointer-events", "none");
+              positionElement(line, ocrRectItem, boundingRect, true);
+              itemContainer.append(line);
+            }
+          } else {
+            for (let clientRect of clientRects) {
+              const line = elementTemplate.cloneNode(true);
+              line.style.setProperty("pointer-events", "none");
+              positionElement(line, clientRect, boundingRect, false);
+              itemContainer.append(line);
+            }
+          }
+        } else {
+          let useOverlay = clientRects.length === 1 && ocrLayout;
+
+          for (let clientRect of clientRects) {
+            const line = elementTemplate.cloneNode(true);
+            line.style.setProperty("pointer-events", "none");
+            positionElement(line, clientRect, boundingRect, useOverlay);
+            itemContainer.append(line);
+          }
         }
       } else if (style.layout === "bounds") {
         const bounds = elementTemplate.cloneNode(true);

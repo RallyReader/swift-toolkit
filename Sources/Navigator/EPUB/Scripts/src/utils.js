@@ -300,10 +300,21 @@ export function getOCRCorrectedRect(range) {
     // If there's an image, use its bounding rect (handles scaled images)
     containerRect = img.getBoundingClientRect();
   } else {
-    // If there's no image, use the container's own bounding rect
-    // This handles cases where the OCR text overlays are positioned
-    // relative to a container without an image
     containerRect = ocrContainer.getBoundingClientRect();
+
+    // When all children are position:absolute (e.g. text overlays + a page-size div),
+    // the inline-block container collapses to 0x0. Fall back to the first non-overlay
+    // child that has real dimensions — typically the page reference div.
+    if (containerRect.width <= 1 || containerRect.height <= 1) {
+      for (const child of ocrContainer.children) {
+        if (child.classList.contains("text-overlay")) continue;
+        const childRect = child.getBoundingClientRect();
+        if (childRect.width > 0 && childRect.height > 0) {
+          containerRect = childRect;
+          break;
+        }
+      }
+    }
   }
 
   // Extract the percentage values from the text-overlay's inline style
@@ -348,6 +359,148 @@ export function getOCRCorrectedRect(range) {
   }
 
   return null;
+}
+
+/**
+ * Returns an array of OCR-corrected rects — one per text-overlay element
+ * that the given range intersects. Each rect includes an optional rotation.
+ * Returns null if the range is not inside OCR content.
+ */
+export function getAllOCRCorrectedRects(range) {
+  if (!range) return null;
+
+  let startNode = range.startContainer;
+  if (startNode.nodeType === Node.TEXT_NODE) {
+    startNode = startNode.parentElement;
+  }
+
+  const textOverlay = startNode.closest(".text-overlay");
+  if (!textOverlay) return null;
+
+  const ocrContainer = textOverlay.closest(".ocr-container");
+  if (!ocrContainer) return null;
+
+  const img = ocrContainer.querySelector("img");
+  let containerRect;
+
+  if (img) {
+    containerRect = img.getBoundingClientRect();
+  } else {
+    containerRect = ocrContainer.getBoundingClientRect();
+    if (containerRect.width <= 1 || containerRect.height <= 1) {
+      for (const child of ocrContainer.children) {
+        if (child.classList.contains("text-overlay")) continue;
+        const childRect = child.getBoundingClientRect();
+        if (childRect.width > 0 && childRect.height > 0) {
+          containerRect = childRect;
+          break;
+        }
+      }
+    }
+  }
+
+  if (containerRect.width <= 1 || containerRect.height <= 1) return null;
+
+  const allOverlays = ocrContainer.querySelectorAll(".text-overlay");
+  const rects = [];
+
+  for (const overlay of allOverlays) {
+    if (!range.intersectsNode(overlay)) continue;
+
+    const styleTop = overlay.style.top;
+    const styleLeft = overlay.style.left;
+    const styleWidth = overlay.style.width;
+    const styleHeight = overlay.style.height;
+
+    if (
+      styleTop &&
+      styleLeft &&
+      styleWidth &&
+      styleHeight &&
+      styleTop.includes("%") &&
+      styleLeft.includes("%") &&
+      styleWidth.includes("%") &&
+      styleHeight.includes("%")
+    ) {
+      const topPercent = parseFloat(styleTop) / 100;
+      const leftPercent = parseFloat(styleLeft) / 100;
+      const widthPercent = parseFloat(styleWidth) / 100;
+      const heightPercent = parseFloat(styleHeight) / 100;
+
+      let scaledTop = containerRect.top + containerRect.height * topPercent;
+      let scaledLeft = containerRect.left + containerRect.width * leftPercent;
+      let scaledWidth = containerRect.width * widthPercent;
+      let scaledHeight = containerRect.height * heightPercent;
+
+      // If the range only partially covers this overlay, scale width
+      // proportionally and shift left to match the covered portion.
+      const fullText = overlay.textContent.trim();
+      if (fullText.length > 0) {
+        const overlayRange = document.createRange();
+        overlayRange.selectNodeContents(overlay);
+
+        const clippedRange = range.cloneRange();
+        if (
+          clippedRange.compareBoundaryPoints(
+            Range.START_TO_START,
+            overlayRange
+          ) < 0
+        ) {
+          clippedRange.setStart(
+            overlayRange.startContainer,
+            overlayRange.startOffset
+          );
+        }
+        if (
+          clippedRange.compareBoundaryPoints(Range.END_TO_END, overlayRange) > 0
+        ) {
+          clippedRange.setEnd(
+            overlayRange.endContainer,
+            overlayRange.endOffset
+          );
+        }
+
+        const clippedText = clippedRange.toString().trim();
+        if (clippedText.length > 0 && clippedText.length < fullText.length) {
+          const beforeRange = overlayRange.cloneRange();
+          beforeRange.setEnd(
+            clippedRange.startContainer,
+            clippedRange.startOffset
+          );
+          const beforeText = beforeRange.toString().trim();
+
+          const startFraction = beforeText.length / fullText.length;
+          const widthFraction = clippedText.length / fullText.length;
+
+          scaledLeft += scaledWidth * startFraction;
+          scaledWidth *= widthFraction;
+        }
+      }
+
+      let rotation = undefined;
+      const inlineTransform = overlay.style.transform;
+      if (inlineTransform) {
+        const rotateMatch = inlineTransform.match(/rotate\(([-\d.]+)deg\)/);
+        if (rotateMatch) {
+          rotation = parseFloat(rotateMatch[1]);
+        }
+      }
+
+      rects.push({
+        left: scaledLeft,
+        top: scaledTop,
+        right: scaledLeft + scaledWidth,
+        bottom: scaledTop + scaledHeight,
+        width: scaledWidth,
+        height: scaledHeight,
+        x: scaledLeft,
+        y: scaledTop,
+        rotation,
+      });
+    }
+  }
+
+  return rects.length > 0 ? rects : null;
 }
 
 let rectsCache = new LRUCache(10);
