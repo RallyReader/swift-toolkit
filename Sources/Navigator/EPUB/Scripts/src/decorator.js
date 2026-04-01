@@ -547,6 +547,48 @@ export function DecorationGroup(groupId, groupName) {
     }
   }
 
+  let cachedTextContentBounds = null;
+
+  // Computes the vertical extent (minY/maxY) of all text content on the
+  // page so we can check whether an element is at the top/bottom of the
+  // actual text area rather than the viewport.
+  function getTextContentBounds() {
+    if (cachedTextContentBounds) return cachedTextContentBounds;
+
+    let minY = Infinity;
+    let maxY = -Infinity;
+
+    // OCR layouts: every word is in its own .text-overlay element
+    let textElements = document.querySelectorAll(".text-overlay");
+
+    if (textElements.length === 0) {
+      // Regular fixed-layout: text frames inside the text layer
+      textElements = document.querySelectorAll(
+        '#text-layer [class*="textframe"], #main-content [class*="textframe"]'
+      );
+    }
+
+    for (const el of textElements) {
+      const rect = el.getBoundingClientRect();
+      if (rect.height > 0 && rect.width > 0) {
+        minY = Math.min(minY, rect.top);
+        maxY = Math.max(maxY, rect.bottom);
+      }
+    }
+
+    if (minY === Infinity || maxY === -Infinity) {
+      cachedTextContentBounds = {
+        minY: 0,
+        maxY: window.innerHeight,
+        measured: false,
+      };
+    } else {
+      cachedTextContentBounds = { minY, maxY, measured: true };
+    }
+
+    return cachedTextContentBounds;
+  }
+
   function isPageNumber(text) {
     const trimmedText = text.trim();
     // Only return true for strings that consist entirely of digits
@@ -609,10 +651,19 @@ export function DecorationGroup(groupId, groupName) {
     if (isPageNumber(text)) {
       log(`PAGE NUMBER :: page number detected: ${text}`);
 
-      // IMPROVEMENT 1: More lenient position check - expand from 20% to 30% at bottom
+      // Check position relative to the actual text content area, not the
+      // viewport — handles pages where text is in a smaller centered section.
+      // Use a tight threshold when we measured real text bounds (OCR/fixed),
+      // and a more generous one when falling back to the viewport (regular books).
+      const textBounds = getTextContentBounds();
+      const textHeight = textBounds.maxY - textBounds.minY;
+      const relativeTop = boundingRect.top - textBounds.minY;
+      const posThreshold = textBounds.measured ? 0.05 : 0.15;
       const isAtTopOrBottom =
-        boundingRect.top < window.innerHeight * 0.2 ||
-        boundingRect.top > window.innerHeight * 0.8;
+        textHeight > 0
+          ? relativeTop < textHeight * posThreshold ||
+            relativeTop > textHeight * (1 - posThreshold)
+          : false;
 
       if (isAtTopOrBottom) {
         log(`PAGE NUMBER :: is at top or bottom: ${text}`);
@@ -641,6 +692,13 @@ export function DecorationGroup(groupId, groupName) {
           immediateTextBefore
         );
 
+        // Check if the preceding text connects to this number via a
+        // digit + connecting character (e.g., "8:" → "30" = time "8:30").
+        // We collapse all whitespace to handle OCR layouts where each word
+        // is in its own element separated by newlines.
+        const beforeContentCollapsed = before.replace(/\s+/g, " ").trim();
+        const beforeConnectsToNumber = /\d[:-]$/.test(beforeContentCollapsed);
+
         // Check if 'before' ends in newline, is empty, or has no alphanumeric characters
         const beforeIsEmpty = before.length === 0;
         const beforeEndsInNewline = before.endsWith("\n");
@@ -668,10 +726,17 @@ export function DecorationGroup(groupId, groupName) {
           // Check if parent has very little content (just the page number)
           const parentHasMinimalContent = parentText.length <= 5;
 
-          isDOMIsolated = isOnlyPageNumber || parentHasMinimalContent;
+          // In OCR-style layouts (text-overlay divs inside ocr-container),
+          // every word is in its own element, so DOM isolation is not meaningful.
+          const isInOCRLayout =
+            !!startNode.closest(".ocr-container") ||
+            startNode.classList.contains("text-overlay");
+
+          isDOMIsolated =
+            !isInOCRLayout && (isOnlyPageNumber || parentHasMinimalContent);
 
           log(
-            `PAGE NUMBER :: DOM isolation check - parentText: "${parentText}", isOnlyPageNumber: ${isOnlyPageNumber}, isDOMIsolated: ${isDOMIsolated}`
+            `PAGE NUMBER :: DOM isolation check - parentText: "${parentText}", isOnlyPageNumber: ${isOnlyPageNumber}, isInOCRLayout: ${isInOCRLayout}, isDOMIsolated: ${isDOMIsolated}`
           );
         } catch (error) {
           log(`PAGE NUMBER :: DOM isolation check failed: ${error.message}`);
@@ -688,7 +753,8 @@ export function DecorationGroup(groupId, groupName) {
         // IMPROVEMENT 5: Enhanced isolation check with additional patterns
         // CRITICAL: Exclude numbers that immediately follow words (like "Chapter 1")
         const isIsolatedWithEnhancements =
-          !beforeEndsWithWordAndSpace && // NEW: Exclude if preceded by word like "Chapter "
+          !beforeEndsWithWordAndSpace && // Exclude if preceded by word like "Chapter "
+          !beforeConnectsToNumber && // Exclude if part of compound like "8:30"
           (isIsolatedPageNumber || // Keep original logic
             (isDOMIsolated &&
               (afterIsEmpty ||
@@ -724,6 +790,9 @@ export function DecorationGroup(groupId, groupName) {
         );
         log(
           `PAGE NUMBER :: immediate text before: "${immediateTextBefore}" | ends with word+space: ${beforeEndsWithWordAndSpace}`
+        );
+        log(
+          `PAGE NUMBER :: collapsed before: "${beforeContentCollapsed}" | connects to number: ${beforeConnectsToNumber}`
         );
 
         log(`PAGE NUMBER :: after: "${after}"`);
