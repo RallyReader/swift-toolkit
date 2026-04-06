@@ -345,6 +345,15 @@ export function getOCRCorrectedRect(range) {
     const scaledWidth = containerRect.width * widthPercent;
     const scaledHeight = containerRect.height * heightPercent;
 
+    let rotation = undefined;
+    const inlineTransform = textOverlayElement.style.transform;
+    if (inlineTransform) {
+      const rotateMatch = inlineTransform.match(/rotate\(([-\d.]+)deg\)/);
+      if (rotateMatch) {
+        rotation = parseFloat(rotateMatch[1]);
+      }
+    }
+
     // Return a DOMRect-like object
     return {
       left: scaledLeft,
@@ -355,6 +364,7 @@ export function getOCRCorrectedRect(range) {
       height: scaledHeight,
       x: scaledLeft,
       y: scaledTop,
+      rotation,
     };
   }
 

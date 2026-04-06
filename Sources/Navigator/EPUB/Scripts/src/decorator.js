@@ -863,25 +863,7 @@ export function DecorationGroup(groupId, groupName) {
       computedWidth = `${ocrRect.width}px`;
       computedHeight = `${ocrRect.height}px`;
 
-      // Extract rotation from text-overlay element if present
-      let startNode = item.range.startContainer;
-      if (startNode.nodeType === Node.TEXT_NODE) {
-        startNode = startNode.parentElement;
-      }
-      const textOverlayElement = startNode.closest(".text-overlay");
-      if (textOverlayElement) {
-        const computedStyle = window.getComputedStyle(textOverlayElement);
-        const transform = computedStyle.transform;
-        if (transform && transform !== "none") {
-          const inlineStyle = textOverlayElement.style.transform;
-          if (inlineStyle) {
-            const rotateMatch = inlineStyle.match(/rotate\(([-\d.]+)deg\)/);
-            if (rotateMatch) {
-              rotationAngle = parseFloat(rotateMatch[1]);
-            }
-          }
-        }
-      }
+      rotationAngle = ocrRect.rotation;
     } else {
       log("No OCR layout detected for this range.");
     }
@@ -983,12 +965,45 @@ export function DecorationGroup(groupId, groupName) {
         );
       }
 
-      // Apply rotation transform if present
       if (rotationAngle !== undefined) {
-        element.style.transform = `rotate(${rotationAngle}deg)`;
-        element.style.transformOrigin = "center";
-        log(`Applied rotation: ${rotationAngle}deg`);
+        // Determine whether the element already has a transform or an animation
+        // that redefines `transform` in its keyframes. We need the element in
+        // the live document for class-based styles to be computable.
+        document.body.appendChild(element);
+        const computed = window.getComputedStyle(element);
+        const hasExistingTransform =
+          element.style.transform !== "" || computed.animationName !== "none";
+        document.body.removeChild(element);
+
+        if (hasExistingTransform) {
+          // Wrap: outer div holds position + rotation so the inner element's
+          // animation keyframes (which redefine `transform`) cannot interfere.
+          const wrapper = document.createElement("div");
+          wrapper.style.position = element.style.position;
+          wrapper.style.left = element.style.left;
+          wrapper.style.top = element.style.top;
+          wrapper.style.width = element.style.width;
+          wrapper.style.height = element.style.height;
+          wrapper.style.transform = `rotate(${rotationAngle}deg)`;
+          wrapper.style.transformOrigin = "center";
+          wrapper.style.setProperty("pointer-events", "none");
+          log(`Applied rotation via wrapper: ${rotationAngle}deg`);
+
+          element.style.position = "static";
+          element.style.left = "";
+          element.style.top = "";
+          element.style.width = "100%";
+          element.style.height = "100%";
+
+          wrapper.append(element);
+          return wrapper;
+        } else {
+          element.style.transform = `rotate(${rotationAngle}deg)`;
+          element.style.transformOrigin = "center";
+          log(`Applied rotation: ${rotationAngle}deg`);
+        }
       }
+      return element;
     }
 
     let elementTemplate;
@@ -1037,15 +1052,17 @@ export function DecorationGroup(groupId, groupName) {
 
               const line = elementTemplate.cloneNode(true);
               line.style.setProperty("pointer-events", "none");
-              positionElement(line, ocrRectItem, boundingRect, true);
-              itemContainer.append(line);
+              itemContainer.append(
+                positionElement(line, ocrRectItem, boundingRect, true)
+              );
             }
           } else {
             for (let clientRect of clientRects) {
               const line = elementTemplate.cloneNode(true);
               line.style.setProperty("pointer-events", "none");
-              positionElement(line, clientRect, boundingRect, false);
-              itemContainer.append(line);
+              itemContainer.append(
+                positionElement(line, clientRect, boundingRect, false)
+              );
             }
           }
         } else {
@@ -1054,17 +1071,18 @@ export function DecorationGroup(groupId, groupName) {
           for (let clientRect of clientRects) {
             const line = elementTemplate.cloneNode(true);
             line.style.setProperty("pointer-events", "none");
-            positionElement(line, clientRect, boundingRect, useOverlay);
-            itemContainer.append(line);
+            itemContainer.append(
+              positionElement(line, clientRect, boundingRect, useOverlay)
+            );
           }
         }
       } else if (style.layout === "bounds") {
         const bounds = elementTemplate.cloneNode(true);
         bounds.style.setProperty("pointer-events", "none");
         // Use overlay position for bounds layout when available
-        positionElement(bounds, boundingRect, boundingRect, ocrLayout);
-
-        itemContainer.append(bounds);
+        itemContainer.append(
+          positionElement(bounds, boundingRect, boundingRect, ocrLayout)
+        );
       }
     } catch (error) {
       logErrorMessage(`Error calculating position: ${error.message}`);
