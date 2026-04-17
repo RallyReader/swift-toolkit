@@ -10,9 +10,17 @@ import UIKit
 class CustomScrollView: UIScrollView {
     // we want to ignore top and bottom scrolling because of the spreads insets; it's causing scrolling chapter to chapter instead of inside a chapter's pages
     // 44 pixels covers all scenarios: regular(44) and compact(20)
+    // On Mac (iOS app on Mac), trackpad scroll events use synthetic hit testing
+    // that can be rejected by these exclusion zones, so we skip the check on Mac.
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        if point.y < 44 || point.y > self.frame.height-44 {
-            return nil
+        var isMac = false
+        if #available(iOS 14.0, *) {
+            isMac = ProcessInfo.processInfo.isiOSAppOnMac
+        }
+        if !isMac {
+            if point.y < 44 || point.y > self.frame.height - 44 {
+                return nil
+            }
         }
         return super.hitTest(point, with: event)
     }
@@ -370,7 +378,16 @@ extension PaginationView: UIScrollViewDelegate {
     /// https://oleb.net/blog/2014/05/scrollviews-inside-scrollviews/
 
     func scrollViewWillEndDragging(_ scrollView: UIScrollView, withVelocity velocity: CGPoint, targetContentOffset: UnsafeMutablePointer<CGPoint>) {
-        scrollView.isScrollEnabled = false
+        // On Mac (iOS app on Mac), disabling scroll here can prevent
+        // trackpad swipe gestures from completing properly, because
+        // the deceleration phase may never fire scrollViewDidEndDecelerating.
+        var isMac = false
+        if #available(iOS 14.0, *) {
+            isMac = ProcessInfo.processInfo.isiOSAppOnMac
+        }
+        if !isMac {
+            scrollView.isScrollEnabled = false
+        }
     }
 
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {

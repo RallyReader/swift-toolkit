@@ -299,8 +299,8 @@ open class PDFNavigatorViewController: UIViewController, VisualNavigator, Select
 
     @available(iOS 13.0, *)
     override open func buildMenu(with builder: UIMenuBuilder) {
-        editingActions.buildMenu(with: builder)
         super.buildMenu(with: builder)
+        editingActions.buildMenu(with: builder)
     }
 
     private func resetPDFView(at locator: Locator?) {

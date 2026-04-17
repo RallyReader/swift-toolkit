@@ -17,6 +17,11 @@ final class WebView: WKWebView {
 
         let config = WKWebViewConfiguration()
         config.mediaTypesRequiringUserActionForPlayback = .all
+
+        if #available(iOS 18.0, *) {
+            config.writingToolsBehavior = .none
+        }
+
         super.init(frame: .zero, configuration: config)
 
         #if DEBUG && swift(>=5.8)
@@ -31,6 +36,15 @@ final class WebView: WKWebView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    @available(iOS 13.0, *)
+    override func buildMenu(with builder: any UIMenuBuilder) {
+        editingActions.buildMenu(with: builder)
+
+        // Don't call super as it is the only way to remove the
+        // "Copy Link with Highlight" menu item.
+        // See https://github.com/readium/swift-toolkit/issues/509
+    }
+
     func clearSelection() {
         evaluateJavaScript("window.getSelection().removeAllRanges()")
         // Before iOS 12, we also need to disable user interaction to get rid of the selection overlays.
@@ -39,8 +53,23 @@ final class WebView: WKWebView {
     }
 
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
-        super.canPerformAction(action, withSender: sender)
-            && editingActions.canPerformAction(action)
+        // Only allow actions explicitly configured in EditingActionsController.
+        // Check our custom actions first; if not recognized, block it regardless
+        // of what WKWebView would normally allow.
+        guard editingActions.canPerformAction(action) else {
+            return false
+        }
+        return super.canPerformAction(action, withSender: sender)
+    }
+
+    /// On Mac Catalyst, AppKit validates menu items via this method.
+    /// Block any command whose action is not a recognized custom editing action.
+    @available(iOS 13.0, *)
+    override func validate(_ command: UICommand) {
+        if !editingActions.canPerformAction(command.action) {
+            command.attributes = .disabled
+        }
+        super.validate(command)
     }
 
     override func copy(_ sender: Any?) {

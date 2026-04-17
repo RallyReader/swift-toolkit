@@ -367,8 +367,8 @@ open class EPUBNavigatorViewController: UIViewController,
 
     @available(iOS 13.0, *)
     override open func buildMenu(with builder: UIMenuBuilder) {
-        viewModel.editingActions.buildMenu(with: builder)
         super.buildMenu(with: builder)
+        viewModel.editingActions.buildMenu(with: builder)
     }
 
     /// Intercepts tap gesture when the web views are not loaded.

@@ -101,6 +101,14 @@ final class EditingActionsController {
         self.actions = actions
         rights = publication.rights
         canShare = !publication.isProtected
+
+        // Register custom menu items immediately so they are available
+        // when the system first builds a context menu (e.g. on Mac right-click).
+        // Visibility is still controlled by canPerformAction(_:).
+        let customItems = actions.compactMap(\.menuItem)
+        if !customItems.isEmpty {
+            UIMenuController.shared.menuItems = customItems
+        }
     }
 
     /// Current user selection contents and frame in the publication view.
@@ -120,22 +128,33 @@ final class EditingActionsController {
     }
 
     func canPerformAction(_ selector: Selector) -> Bool {
-        // Accessibility editing actions (e.g. Spoken Option in Accessibility
-        // system settings) cannot be properly disabled.
-        guard !selector.description.hasPrefix("_accessibility") else {
-            return true
-        }
-
-        guard
-            isEnabled,
-            let selection = selection,
-            let action = actions.first(where: { $0.actions.contains(selector) }),
-            isActionAllowed(action)
+        guard let action = actions.first(where: { $0.actions.contains(selector) }),
+              isActionAllowed(action)
         else {
             return false
         }
 
-        return delegate?.editingActions(self, canPerformAction: action, for: selection) ?? true
+        // On Mac (iOS app on Mac), the WKScriptMessage for selection changes
+        // is delivered asynchronously, so `selection` may still be nil when the
+        // system builds the context menu after a right-click. For custom actions
+        // we allow them optimistically — by the time the user taps the menu item,
+        // the selection will have been processed.
+        if selection == nil {
+            var isMac = false
+            if #available(iOS 14.0, *) {
+                isMac = ProcessInfo.processInfo.isiOSAppOnMac
+            }
+            if isMac, case .custom = action.kind {
+                return true
+            }
+            return false
+        }
+
+        guard isEnabled else {
+            return false
+        }
+
+        return delegate?.editingActions(self, canPerformAction: action, for: selection!) ?? true
     }
 
     /// Verifies that the user has the rights to use the given `action`.
@@ -152,17 +171,22 @@ final class EditingActionsController {
 
     @available(iOS 13.0, *)
     func buildMenu(with builder: UIMenuBuilder) {
-        if !canPerformAction(.lookup) {
-            builder.remove(menu: .lookup)
-        }
-        if !canPerformAction(.share) {
-            builder.remove(menu: .share)
-        }
-
-        // Learn is removed as it seems bugged on iOS 17: it opens a Text
-        // Expansion setting which allows to copy the selection.
-        // To reproduce, comment out and select Japanese text on a PDF.
+        // Remove all system menus so only custom editing actions remain.
+        builder.remove(menu: .lookup)
+        builder.remove(menu: .share)
         builder.remove(menu: .learn)
+        builder.remove(menu: .standardEdit)
+        builder.remove(menu: .undoRedo)
+        builder.remove(menu: .find)
+        builder.remove(menu: .replace)
+        builder.remove(menu: .speech)
+        builder.remove(menu: .spelling)
+        builder.remove(menu: .substitutions)
+        builder.remove(menu: .transformations)
+        builder.remove(menu: .text)
+        if #available(iOS 17.0, *) {
+            builder.remove(menu: .autoFill)
+        }
     }
 
     func updateSharedMenuController() {
