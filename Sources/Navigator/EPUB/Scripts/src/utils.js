@@ -1209,6 +1209,64 @@ export function getLastWordText() {
   return null; // Return null if no word is found
 }
 
+function countWords(text) {
+  if (!text) {
+    return 0;
+  }
+
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  return words.length;
+}
+
+function clampToRange(value, lowerBound, upperBound) {
+  return Math.min(Math.max(value, lowerBound), upperBound);
+}
+
+export function getReadingProgressForLocator(locator) {
+  try {
+    const root = document.body || document.documentElement || document;
+    if (!root) {
+      return null;
+    }
+
+    const totalText = root.textContent || "";
+    const totalCharacters = totalText.length;
+    const totalWords = countWords(totalText);
+
+    const readRange = locator ? rangeFromLocator(locator) : null;
+    if (!readRange) {
+      return null;
+    }
+
+    const fullRange = document.createRange();
+    fullRange.selectNodeContents(root);
+
+    const consumedRange = document.createRange();
+    consumedRange.setStart(fullRange.startContainer, fullRange.startOffset);
+    consumedRange.setEnd(readRange.endContainer, readRange.endOffset);
+
+    const readText = consumedRange.toString();
+    const readCharacters = clampToRange(readText.length, 0, totalCharacters);
+    const readWords = clampToRange(countWords(readText), 0, totalWords);
+
+    const wordsPercentage = totalWords > 0 ? (readWords / totalWords) * 100 : 0;
+    const charactersPercentage =
+      totalCharacters > 0 ? (readCharacters / totalCharacters) * 100 : 0;
+
+    return {
+      readWords,
+      totalWords,
+      readCharacters,
+      totalCharacters,
+      wordsPercentage,
+      charactersPercentage,
+    };
+  } catch (e) {
+    logError(e);
+    return null;
+  }
+}
+
 export function hasOCRContainer() {
   // This selects the first div element with class "ocr-container"
   return document.querySelector("div.ocr-container") !== null;

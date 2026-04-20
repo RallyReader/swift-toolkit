@@ -68,6 +68,85 @@ open class EPUBNavigatorViewController: UIViewController,
         /// server.
         case serverFailure(Error)
     }
+    
+    public struct LocatorReadingProgress: Equatable {
+        public let readWords: Int
+        public let totalWords: Int
+        public let readCharacters: Int
+        public let totalCharacters: Int
+        public let wordsPercentage: Double
+        public let charactersPercentage: Double
+        
+        public init(
+            readWords: Int,
+            totalWords: Int,
+            readCharacters: Int,
+            totalCharacters: Int,
+            wordsPercentage: Double,
+            charactersPercentage: Double
+        ) {
+            self.totalWords = max(0, totalWords)
+            self.totalCharacters = max(0, totalCharacters)
+            self.readWords = min(max(0, readWords), self.totalWords)
+            self.readCharacters = min(max(0, readCharacters), self.totalCharacters)
+            self.wordsPercentage = min(max(wordsPercentage, 0), 100)
+            self.charactersPercentage = min(max(charactersPercentage, 0), 100)
+        }
+        
+        init?(json: [String: Any]) {
+            guard
+                let readWords = Self.intValue(from: json["readWords"]),
+                let totalWords = Self.intValue(from: json["totalWords"]),
+                let readCharacters = Self.intValue(from: json["readCharacters"]),
+                let totalCharacters = Self.intValue(from: json["totalCharacters"])
+            else {
+                return nil
+            }
+            
+            let computedWordsPercentage = totalWords > 0 ? (Double(readWords) / Double(totalWords)) * 100.0 : 0
+            let computedCharactersPercentage = totalCharacters > 0 ? (Double(readCharacters) / Double(totalCharacters)) * 100.0 : 0
+            self.init(
+                readWords: readWords,
+                totalWords: totalWords,
+                readCharacters: readCharacters,
+                totalCharacters: totalCharacters,
+                wordsPercentage: Self.doubleValue(from: json["wordsPercentage"]) ?? computedWordsPercentage,
+                charactersPercentage: Self.doubleValue(from: json["charactersPercentage"]) ?? computedCharactersPercentage
+            )
+        }
+        
+        private static func intValue(from value: Any?) -> Int? {
+            if let intValue = value as? Int {
+                return intValue
+            }
+            if let doubleValue = value as? Double {
+                return Int(doubleValue)
+            }
+            if let number = value as? NSNumber {
+                return number.intValue
+            }
+            if let string = value as? String, let intValue = Int(string) {
+                return intValue
+            }
+            return nil
+        }
+        
+        private static func doubleValue(from value: Any?) -> Double? {
+            if let doubleValue = value as? Double {
+                return doubleValue
+            }
+            if let intValue = value as? Int {
+                return Double(intValue)
+            }
+            if let number = value as? NSNumber {
+                return number.doubleValue
+            }
+            if let string = value as? String, let doubleValue = Double(string) {
+                return doubleValue
+            }
+            return nil
+        }
+    }
 
     public struct Configuration {
         /// Initial set of setting preferences.
@@ -925,6 +1004,36 @@ open class EPUBNavigatorViewController: UIViewController,
         } else {
             completion(nil)
         }
+    }
+    
+    public func getReadingProgressForLocator(_ locator: Locator, completion: @escaping (LocatorReadingProgress?) -> Void) {
+        guard let locatorJson = locator.jsonString else {
+            completion(nil)
+            return
+        }
+        
+        guard let spreadView = loadedSpreadView(forHREF: locator.href) else {
+            completion(nil)
+            return
+        }
+        
+        let script = "readium.getReadingProgressForLocator(\(locatorJson))"
+        spreadView.evaluateScript(script, inHREF: locator.href, completion: { result in
+            do {
+                let readiumResult = try result.get()
+                let progress = (readiumResult as? [String: Any]).flatMap {
+                    LocatorReadingProgress(json: $0)
+                }
+                DispatchQueue.main.async {
+                    completion(progress)
+                }
+            } catch {
+                self.log(.error, error)
+                DispatchQueue.main.async {
+                    completion(nil)
+                }
+            }
+        })
     }
     
     public func getHtmlBodyTextContent(href: String, completion: @escaping (String?) -> Void) {

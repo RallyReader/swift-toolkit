@@ -24,6 +24,7 @@ import {
   getFirstVisibleWordText,
   getLastVisibleWordText,
   getLastWordText,
+  getReadingProgressForLocator,
   hasOCRContainer,
   getHtmlBodyTextContent,
 } from "./utils";
@@ -46,6 +47,7 @@ global.readium = {
   getFirstVisibleWordText: getFirstVisibleWordText,
   getLastVisibleWordText: getLastVisibleWordText,
   getLastWordText: getLastWordText,
+  getReadingProgressForLocator: getReadingProgressForLocator,
   hasOCRContainer: hasOCRContainer,
   getHtmlBodyTextContent: getHtmlBodyTextContent,
   // decoration
