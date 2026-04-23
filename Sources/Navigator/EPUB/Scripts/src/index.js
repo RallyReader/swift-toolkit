@@ -27,6 +27,8 @@ import {
   getReadingProgressForLocator,
   hasOCRContainer,
   getHtmlBodyTextContent,
+  getVisibleTextRange,
+  getVisibleText,
 } from "./utils";
 import { getDecorations, registerTemplates } from "./decorator";
 
@@ -50,6 +52,8 @@ global.readium = {
   getReadingProgressForLocator: getReadingProgressForLocator,
   hasOCRContainer: hasOCRContainer,
   getHtmlBodyTextContent: getHtmlBodyTextContent,
+  getVisibleTextRange: getVisibleTextRange,
+  getVisibleText: getVisibleText,
   // decoration
   registerDecorationTemplates: registerTemplates,
   getDecorations: getDecorations,

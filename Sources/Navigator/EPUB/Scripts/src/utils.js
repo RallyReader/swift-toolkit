@@ -1276,6 +1276,86 @@ export function getHtmlBodyTextContent() {
   return document.body.textContent;
 }
 
+export function getVisibleTextRange() {
+  const checkRange = document.createRange();
+  let charOffset = 0;
+  let rangeStart = -1;
+  let rangeEnd = -1;
+
+  const treeWalker = document.createTreeWalker(
+    document.body,
+    NodeFilter.SHOW_TEXT,
+    null
+  );
+
+  let node;
+  while ((node = treeWalker.nextNode())) {
+    const text = node.nodeValue || "";
+    const len = text.length;
+
+    if (text.trim().length > 0) {
+      checkRange.selectNodeContents(node);
+      const rect = checkRange.getBoundingClientRect();
+
+      if (
+        rect.right > 0 &&
+        rect.left < window.innerWidth &&
+        rect.bottom > 0 &&
+        rect.top < window.innerHeight
+      ) {
+        if (rangeStart === -1) {
+          rangeStart = charOffset;
+        }
+        rangeEnd = charOffset + len;
+      }
+    }
+
+    charOffset += len;
+  }
+
+  if (rangeStart === -1) {
+    return null;
+  }
+
+  return { location: rangeStart, length: rangeEnd - rangeStart };
+}
+
+export function getVisibleText() {
+  const range = document.createRange();
+  const nodeIterator = document.createNodeIterator(
+    document.body,
+    NodeFilter.SHOW_TEXT,
+    {
+      acceptNode: function (node) {
+        if (node.nodeValue.trim().length > 0) {
+          range.selectNodeContents(node);
+          const rect = range.getBoundingClientRect();
+          if (
+            rect.right > 0 &&
+            rect.left < window.innerWidth &&
+            rect.bottom > 0 &&
+            rect.top < window.innerHeight
+          ) {
+            return NodeFilter.FILTER_ACCEPT;
+          }
+        }
+        return NodeFilter.FILTER_REJECT;
+      },
+    }
+  );
+
+  const parts = [];
+  let node;
+  while ((node = nodeIterator.nextNode())) {
+    const text = node.nodeValue;
+    if (text) {
+      parts.push(text);
+    }
+  }
+
+  return parts.join("") || null;
+}
+
 /// User Settings.
 export function setCSSProperties(properties) {
   for (const name in properties) {

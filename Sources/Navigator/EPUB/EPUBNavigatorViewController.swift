@@ -1053,6 +1053,46 @@ open class EPUBNavigatorViewController: UIViewController,
         }
     }
     
+    public func getVisibleTextRange(href: String, completion: @escaping (NSRange?) -> Void) {
+        if let spreadView = loadedSpreadView(forHREF: href) {
+            let script = "readium.getVisibleTextRange()"
+            spreadView.evaluateScript(script, inHREF: href, completion: { result in
+                do {
+                    let readiumResult = try result.get()
+                    if let dict = readiumResult as? [String: Int],
+                       let location = dict["location"],
+                       let length = dict["length"] {
+                        completion(NSRange(location: location, length: length))
+                    } else {
+                        completion(nil)
+                    }
+                } catch {
+                    self.log(.error, error)
+                    completion(nil)
+                }
+            })
+        } else {
+            completion(nil)
+        }
+    }
+    
+    public func getVisibleText(href: String, completion: @escaping (String?) -> Void) {
+        if let spreadView = loadedSpreadView(forHREF: href) {
+            let script = "readium.getVisibleText()"
+            spreadView.evaluateScript(script, inHREF: href, completion: { result in
+                do {
+                    let readiumResult = try result.get()
+                    completion(readiumResult as? String)
+                } catch {
+                    self.log(.error, error)
+                    completion(nil)
+                }
+            })
+        } else {
+            completion(nil)
+        }
+    }
+    
     public func spreadHasFixedLayout(href: String) -> Bool? {
         if let spreadView = loadedSpreadView(forHREF: href) {
             return spreadView.spread.layout == .fixed
