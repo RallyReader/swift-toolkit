@@ -53,6 +53,11 @@ protocol PageView {
     func go(to location: PageLocation, completion: (() -> Void)?)
 }
 
+protocol PageViewMemoryReleasable {
+    /// Releases heavyweight resources before the page leaves the preload window.
+    func releaseMemory()
+}
+
 extension PageView {
     func go(to location: PageLocation) {
         go(to: location, completion: nil)
@@ -146,11 +151,25 @@ final class PaginationView: UIView, Loggable {
         insertSubview(UIView(frame: .zero), at: 0)
         // Prevents the content from jumping down when the status bar is toggled
         scrollView.contentInsetAdjustmentBehavior = .never
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(didReceiveMemoryWarning),
+            name: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil
+        )
     }
 
     @available(*, unavailable)
     public required init?(coder aDecoder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+        for (_, view) in loadedViews {
+            unload(view)
+        }
     }
 
     override public func layoutSubviews() {
@@ -192,7 +211,7 @@ final class PaginationView: UIView, Loggable {
         self.readingProgression = readingProgression
 
         for (_, view) in loadedViews {
-            view.removeFromSuperview()
+            unload(view)
         }
         loadedViews.removeAll()
         loadingIndexQueue.removeAll()
@@ -224,7 +243,7 @@ final class PaginationView: UIView, Loggable {
         for (i, view) in loadedViews {
             // Flushes the views that are not needed anymore.
             guard firstIndex ... lastIndex ~= i else {
-                view.removeFromSuperview()
+                unload(view)
                 loadedViews.removeValue(forKey: i)
                 continue
             }
@@ -305,6 +324,21 @@ final class PaginationView: UIView, Loggable {
     private enum PageIndexDirection: Int {
         case forward = 1
         case backward = -1
+    }
+
+    private func unload(_ view: UIView & PageView) {
+        (view as? PageViewMemoryReleasable)?.releaseMemory()
+        view.removeFromSuperview()
+    }
+
+    @objc private func didReceiveMemoryWarning() {
+        loadingIndexQueue.removeAll()
+
+        let preloadedViews = loadedViews.filter { index, _ in index != currentIndex }
+        for (index, view) in preloadedViews {
+            unload(view)
+            loadedViews.removeValue(forKey: index)
+        }
     }
 
     // MARK: - Navigation

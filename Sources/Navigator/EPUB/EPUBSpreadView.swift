@@ -52,7 +52,7 @@ protocol EPUBSpreadViewDelegate: AnyObject {
     func spreadViewScrollViewDidEndDecelerating(_ spreadView: EPUBSpreadView)
 }
 
-class EPUBSpreadView: UIView, Loggable, PageView {
+class EPUBSpreadView: UIView, Loggable, PageView, PageViewMemoryReleasable {
     weak var delegate: EPUBSpreadViewDelegate?
     let viewModel: EPUBNavigatorViewModel
     let spread: EPUBSpread
@@ -69,6 +69,7 @@ class EPUBSpreadView: UIView, Loggable, PageView {
     private var activityIndicatorStopWorkItem: DispatchWorkItem?
 
     private(set) var spreadLoaded = false
+    private var didReleaseMemory = false
 
     required init(
         viewModel: EPUBNavigatorViewModel,
@@ -107,8 +108,7 @@ class EPUBSpreadView: UIView, Loggable, PageView {
     }
 
     deinit {
-        NotificationCenter.default.removeObserver(self)
-        disableJSMessages()
+        releaseMemory()
     }
 
     func setupWebView() {
@@ -154,6 +154,27 @@ class EPUBSpreadView: UIView, Loggable, PageView {
 
     func loadSpread() {
         fatalError("loadSpread() must be implemented in subclasses")
+    }
+
+    func releaseMemory() {
+        guard !didReleaseMemory else {
+            return
+        }
+        didReleaseMemory = true
+
+        NotificationCenter.default.removeObserver(self)
+        activityIndicatorStopWorkItem?.cancel()
+        activityIndicatorView?.removeFromSuperview()
+        activityIndicatorView = nil
+        disableJSMessages()
+
+        webView.stopLoading()
+        webView.navigationDelegate = nil
+        webView.uiDelegate = nil
+        scrollView.delegate = nil
+        webView.configuration.userContentController.removeAllUserScripts()
+        webView.loadHTMLString("", baseURL: nil)
+        webView.removeFromSuperview()
     }
 
     /// Evaluates the given JavaScript into the resource's HTML page.
