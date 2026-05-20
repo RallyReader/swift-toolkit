@@ -129,6 +129,7 @@ public extension HTTPClient {
             return CancellableObject()
         }
         var suggestedFilename: String?
+        var hasFailed = false
 
         return stream(
             request,
@@ -136,9 +137,15 @@ public extension HTTPClient {
                 suggestedFilename = response.filename
             },
             consume: { data, progression in
+                guard !hasFailed else { return }
+
                 if data.count > getAvailableStorage() {
-                    // we need to stop because disk storage is full
-                    completion(.failure(HTTPError(kind: .other)))
+                    hasFailed = true
+                    if #available(iOS 13.0, *) { try? fileHandle.close() }
+                    let diskError = NSError(domain: NSPOSIXErrorDomain, code: Int(ENOSPC), userInfo: [
+                        NSLocalizedDescriptionKey: "Not enough disk space to complete the download."
+                    ])
+                    completion(.failure(HTTPError(kind: .ioError, cause: diskError)))
                 } else {
                     fileHandle.seekToEndOfFile()
                     do {
@@ -149,6 +156,8 @@ public extension HTTPClient {
                             fileHandle.write(data)
                         }
                     } catch {
+                        hasFailed = true
+                        if #available(iOS 13.0, *) { try? fileHandle.close() }
                         completion(.failure(HTTPError(kind: .ioError, cause: error)))
                         return
                     }
@@ -159,6 +168,11 @@ public extension HTTPClient {
                 }
             },
             completion: { result in
+                guard !hasFailed else {
+                    try? FileManager.default.removeItem(at: location)
+                    return
+                }
+
                 if #available(iOS 13.0, *) {
                     do {
                         try fileHandle.close()
