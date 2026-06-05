@@ -333,7 +333,7 @@ export function DecorationGroup(groupId, groupName) {
       return;
     }
 
-    let item = { id, decoration, range };
+    let item = { id, decoration, range, enhanced: false };
     items.push(item);
     layout(item, true);
   }
@@ -347,7 +347,7 @@ export function DecorationGroup(groupId, groupName) {
       return;
     }
 
-    let item = { id, decoration, range };
+    let item = { id, decoration, range, enhanced: true };
     items.push(item);
     layoutEnhanced(item, true);
   }
@@ -419,7 +419,14 @@ export function DecorationGroup(groupId, groupName) {
   function requestLayout() {
     clearContainer();
     clearAllEnhanced();
-    items.forEach((item) => layout(item, false));
+    cachedTextContentBounds = null;
+    items.forEach((item) => {
+      if (item.enhanced) {
+        layoutEnhanced(item, false);
+      } else {
+        layout(item, false);
+      }
+    });
   }
 
   /**

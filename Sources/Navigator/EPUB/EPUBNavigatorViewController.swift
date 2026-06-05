@@ -832,6 +832,7 @@ open class EPUBNavigatorViewController: UIViewController,
             let spreadIndex = spreads.firstIndex(withHref: locator.href),
             on(.jump(locator))
         else {
+            completion()
             return false
         }
 

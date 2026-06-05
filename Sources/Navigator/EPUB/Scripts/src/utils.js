@@ -70,12 +70,14 @@ window.addEventListener(
   function () {
     const observer = new ResizeObserver(() => {
       appendVirtualColumnIfNeeded();
+      maxScreenX = window.innerWidth;
     });
     observer.observe(document.body);
 
     // on page load
     window.addEventListener("orientationchange", function () {
       orientationChanged();
+      rectsCache.clear();
       snapCurrentPosition();
     });
     orientationChanged();
@@ -173,10 +175,7 @@ document.addEventListener(
 );
 
 function orientationChanged() {
-  maxScreenX =
-    window.orientation === 0 || window.orientation == 180
-      ? screen.width
-      : screen.height;
+  maxScreenX = window.innerWidth;
 }
 
 export function getColumnCountPerScreen() {

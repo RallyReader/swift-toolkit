@@ -157,12 +157,12 @@ public class UserSettings {
             self.textAlignment = textAlignment
         }
 
-        // Column count
-        if isKeyPresentInUserDefaults(key: ReadiumCSSName.columnCount) {
-            self.columnCount = userDefaults.integer(forKey: ReadiumCSSName.columnCount.rawValue)
-        } else {
+//        // Column count
+//        if isKeyPresentInUserDefaults(key: ReadiumCSSName.columnCount) {
+//            self.columnCount = userDefaults.integer(forKey: ReadiumCSSName.columnCount.rawValue)
+//        } else {
             self.columnCount = columnCount
-        }
+//        }
 
         // Word spacing
         if isKeyPresentInUserDefaults(key: ReadiumCSSName.wordSpacing) {
