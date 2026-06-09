@@ -1116,6 +1116,17 @@ open class EPUBNavigatorViewController: UIViewController,
         return false
     }
     
+    /// Returns whether the currently displayed spread is a two-page fixed-layout spread that
+    /// already contains the given href. In that case the resource is visible side-by-side with
+    /// the other page, so there is no need to navigate to it.
+    public func currentTwoPageFixedSpreadContains(href: String) -> Bool {
+        guard let spreadView = paginationView.loadedViews[paginationView.currentIndex] as? EPUBSpreadView else {
+            return false
+        }
+        let spread = spreadView.spread
+        return spread.spread && spread.layout == .fixed && spread.contains(href: href)
+    }
+    
     public func scrollViewInsideSpreadView(forHREF href: String) -> UIScrollView? {
         let spreadView = loadedSpreadView(forHREF: href)
         return spreadView?.scrollView
