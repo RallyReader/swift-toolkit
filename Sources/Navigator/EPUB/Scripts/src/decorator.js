@@ -421,10 +421,18 @@ export function DecorationGroup(groupId, groupName) {
     clearAllEnhanced();
     cachedTextContentBounds = null;
     items.forEach((item) => {
-      if (item.enhanced) {
-        layoutEnhanced(item, false);
-      } else {
-        layout(item, false);
+      // A failure on a single item must not abort the whole relayout,
+      // otherwise every decoration cleared above stays gone.
+      try {
+        if (item.enhanced) {
+          layoutEnhanced(item, false, true);
+        } else {
+          layout(item, false);
+        }
+      } catch (error) {
+        logErrorMessage(
+          `Error laying out decoration ${item.id}: ${error.message}`
+        );
       }
     });
   }
@@ -602,7 +610,7 @@ export function DecorationGroup(groupId, groupName) {
     return /^\d+$/.test(trimmedText);
   }
 
-  function layoutEnhanced(item, postMessage) {
+  function layoutEnhanced(item, postMessage, isRelayout = false) {
     let style = styles.get(item.decoration.style);
     if (!style) {
       logErrorMessage(`Unknown decoration style: ${item.decoration.style}`);
@@ -632,7 +640,12 @@ export function DecorationGroup(groupId, groupName) {
       log(
         `bounding rect: {left: ${boundingRect.left}, top: ${boundingRect.top}, width: ${boundingRect.width}, height: ${boundingRect.height} for: ${item.range}}`
       );
+      // Skip the visibility filter when relaying out existing decorations:
+      // after the spread is scrolled to the reading position, decorations on
+      // previous pages legitimately have negative client rects. They were
+      // already validated when first added, so they must be redrawn.
       if (
+        !isRelayout &&
         item.decoration.userInfo.shoulNotBeIgnored !== true &&
         (boundingRect.left + boundingRect.width < 0 ||
           boundingRect.top + boundingRect.height < 0)
@@ -655,7 +668,7 @@ export function DecorationGroup(groupId, groupName) {
     const startTime = performance.now();
 
     const text = item.decoration.locator.text.highlight;
-    if (isPageNumber(text)) {
+    if (text && isPageNumber(text)) {
       log(`PAGE NUMBER :: page number detected: ${text}`);
 
       // Check position relative to the actual text content area, not the
