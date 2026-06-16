@@ -1097,6 +1097,63 @@ export function getFirstVisibleWordText() {
   return null; // Return null if no visible word is found
 }
 
+// side: "left" | "right" — restricts to the corresponding half of the viewport.
+export function getFirstVisibleWordTextOnSide(side) {
+  const halfWidth = window.innerWidth / 2;
+  const minX = side === "right" ? halfWidth : 0;
+  const maxX = side === "left" ? halfWidth : window.innerWidth;
+
+  const range = document.createRange();
+  const nodeIterator = document.createNodeIterator(
+    document.body,
+    NodeFilter.SHOW_TEXT,
+    {
+      acceptNode: function (node) {
+        if (node.nodeValue.trim().length > 0) {
+          range.selectNodeContents(node);
+          const rect = range.getBoundingClientRect();
+          if (
+            rect.right > minX &&
+            rect.left < maxX &&
+            rect.bottom > 0 &&
+            rect.top < window.innerHeight
+          ) {
+            return NodeFilter.FILTER_ACCEPT;
+          }
+        }
+        return NodeFilter.FILTER_REJECT;
+      },
+    }
+  );
+
+  let documentNode;
+  while ((documentNode = nodeIterator.nextNode())) {
+    const words = documentNode.nodeValue.trim().split(/\s+/);
+    if (words.length > 0) {
+      for (let i = 0; i < words.length; i++) {
+        const wordIndex = documentNode.nodeValue.indexOf(words[i]);
+        const wordRange = document.createRange();
+        wordRange.setStart(documentNode, wordIndex);
+        wordRange.setEnd(documentNode, wordIndex + words[i].length);
+
+        const wordRect = wordRange.getBoundingClientRect();
+        const wordCenter = (wordRect.left + wordRect.right) / 2;
+
+        if (
+          wordCenter >= minX &&
+          wordCenter < maxX &&
+          wordRect.bottom > 0 &&
+          wordRect.top < window.innerHeight
+        ) {
+          return { text: getTextFrom(words[i], wordRange) };
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
 export function getLastVisibleWordText() {
   const range = document.createRange();
   const nodeIterator = document.createNodeIterator(

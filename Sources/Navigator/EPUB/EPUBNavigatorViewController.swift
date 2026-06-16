@@ -1127,6 +1127,123 @@ open class EPUBNavigatorViewController: UIViewController,
         return spread.spread && spread.layout == .fixed && spread.contains(href: href)
     }
     
+    // MARK: - Start page side selection
+
+    public enum ReaderStartPage {
+        case visible
+        case left
+        case right
+    }
+
+    public struct StartPageLayout {
+        public let isTwoUp: Bool
+        public let isFixedLayout: Bool
+        public let leftHref: String?
+        public let rightHref: String?
+
+        public init(isTwoUp: Bool, isFixedLayout: Bool, leftHref: String?, rightHref: String?) {
+            self.isTwoUp = isTwoUp
+            self.isFixedLayout = isFixedLayout
+            self.leftHref = leftHref
+            self.rightHref = rightHref
+        }
+    }
+
+    public func currentStartPageLayout(completion: @escaping (StartPageLayout) -> Void) {
+        guard let spreadView = paginationView.loadedViews[paginationView.currentIndex] as? EPUBSpreadView else {
+            completion(StartPageLayout(isTwoUp: false, isFixedLayout: false, leftHref: nil, rightHref: nil))
+            return
+        }
+
+        let spread = spreadView.spread
+        if spread.layout == .fixed {
+            let isTwoUp = spread.spread && spread.links.count == 2
+            let leftHref = isTwoUp ? spread.linksLTR.first?.href : spread.leading.href
+            let rightHref = isTwoUp ? spread.linksLTR.last?.href : nil
+            completion(StartPageLayout(isTwoUp: isTwoUp, isFixedLayout: true, leftHref: leftHref, rightHref: rightHref))
+        } else {
+            let href = spread.leading.href
+            let script = "readium.getColumnCountPerScreen()"
+            spreadView.evaluateScript(script, inHREF: href) { result in
+                DispatchQueue.main.async {
+                    var isTwoUp = false
+                    if let value = try? result.get() as? Int, value >= 2 {
+                        isTwoUp = true
+                    } else if let value = try? result.get() as? String, Int(value) ?? 0 >= 2 {
+                        isTwoUp = true
+                    }
+                    completion(StartPageLayout(isTwoUp: isTwoUp, isFixedLayout: false, leftHref: href, rightHref: isTwoUp ? href : nil))
+                }
+            }
+        }
+    }
+
+    public func getFirstWordLocatorFromVisiblePage(href: String, side: ReaderStartPage, completion: @escaping (Locator?) -> Void) {
+        switch side {
+        case .visible:
+            getFirstWordLocatorFromVisiblePage(href: href, completion: completion)
+        case .left, .right:
+            let sideArg = side == .left ? "left" : "right"
+            if let spreadView = loadedSpreadView(forHREF: href) {
+                let script = "readium.getFirstVisibleWordTextOnSide('\(sideArg)')"
+                spreadView.evaluateScript(script, inHREF: href, completion: { result in
+                    do {
+                        let readiumResult = try result.get()
+                        if let selection = readiumResult as? [String: Any],
+                           let text = try? Locator.Text(json: selection["text"]) {
+                            let locator = Locator(href: href, type: "text/html", text: text)
+                            completion(locator)
+                        } else {
+                            completion(nil)
+                        }
+                    } catch {
+                        self.log(.error, error)
+                        completion(nil)
+                    }
+                })
+            } else {
+                completion(nil)
+            }
+        }
+    }
+
+    public func getFirstWordLocatorForStartPage(side: ReaderStartPage, completion: @escaping (Locator?) -> Void) {
+        currentStartPageLayout { [weak self] layout in
+            guard let self = self else {
+                completion(nil)
+                return
+            }
+            switch side {
+            case .visible:
+                if let href = layout.leftHref {
+                    self.getFirstWordLocatorFromVisiblePage(href: href, completion: completion)
+                } else {
+                    completion(nil)
+                }
+            case .left:
+                if let href = layout.leftHref {
+                    if layout.isFixedLayout {
+                        self.getFirstWordLocatorFromVisiblePage(href: href, completion: completion)
+                    } else {
+                        self.getFirstWordLocatorFromVisiblePage(href: href, side: .left, completion: completion)
+                    }
+                } else {
+                    completion(nil)
+                }
+            case .right:
+                if let href = layout.rightHref {
+                    if layout.isFixedLayout {
+                        self.getFirstWordLocatorFromVisiblePage(href: href, completion: completion)
+                    } else {
+                        self.getFirstWordLocatorFromVisiblePage(href: href, side: .right, completion: completion)
+                    }
+                } else {
+                    completion(nil)
+                }
+            }
+        }
+    }
+
     public func scrollViewInsideSpreadView(forHREF href: String) -> UIScrollView? {
         let spreadView = loadedSpreadView(forHREF: href)
         return spreadView?.scrollView
