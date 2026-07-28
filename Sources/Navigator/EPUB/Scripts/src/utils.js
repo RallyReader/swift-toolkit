@@ -1324,8 +1324,9 @@ export function getReadingProgressForLocator(locator) {
 }
 
 export function hasOCRContainer() {
-  // This selects the first div element with class "ocr-container"
-  return document.querySelector("div.ocr-container") !== null;
+  // Match on the class alone: the container is a <span> wherever a <div> would be invalid,
+  // such as an image inside a <p>.
+  return document.querySelector(".ocr-container") !== null;
 }
 
 export function getHtmlBodyTextContent() {
