@@ -644,11 +644,14 @@ export function DecorationGroup(groupId, groupName) {
       // after the spread is scrolled to the reading position, decorations on
       // previous pages legitimately have negative client rects. They were
       // already validated when first added, so they must be redrawn.
+      const documentLeft = boundingRect.left + window.scrollX;
+      const documentTop =
+        boundingRect.top + document.scrollingElement.scrollTop;
       if (
         !isRelayout &&
         item.decoration.userInfo.shoulNotBeIgnored !== true &&
-        (boundingRect.left + boundingRect.width < 0 ||
-          boundingRect.top + boundingRect.height < 0)
+        (documentLeft + boundingRect.width < 0 ||
+          documentTop + boundingRect.height < 0)
       ) {
         postMessageWithInvalidRect();
         return;
