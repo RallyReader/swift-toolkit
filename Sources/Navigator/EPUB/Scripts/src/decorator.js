@@ -898,9 +898,16 @@ export function DecorationGroup(groupId, groupName) {
       boundingRect,
       useOverlayPosition = false
     ) {
-      // For OCR layouts, use fixed positioning to match viewport-relative coordinates
-      // For regular layouts, use absolute positioning
-      element.style.position = useOverlayPosition ? "fixed" : "absolute";
+      // Always use absolute positioning. The visible-area container has
+      // `contain: paint`, which makes it the containing block for both
+      // absolute AND fixed descendants, so the resolved position is the same.
+      // But WebKit fails to paint absolutely-positioned children (e.g. the
+      // underline `.line` divs) of a *fixed* element inside a paint-contained
+      // ancestor that is offset from the viewport origin: it renders on the
+      // first page but not on any subsequent page. Absolute positioning also
+      // makes the coordinates scroll-invariant (see offsets below), so
+      // decorations added mid page-turn land on the right spot.
+      element.style.position = "absolute";
       log(`style width: ${style.width}`);
       log(`element style width: ${element.style.width}`);
       log(`rect width: ${rect.width}`);
@@ -931,10 +938,14 @@ export function DecorationGroup(groupId, groupName) {
         topPos
       );
 
-      // For fixed positioning (OCR with overlay position), don't add offsets
-      // For absolute positioning (normal content), add offsets
-      let finalXOffset = useOverlayPosition ? 0 : xOffset;
-      let finalYOffset = useOverlayPosition ? 0 : yOffset;
+      // The rects are viewport-relative while the visible-area container sits
+      // at document x = pageIndex * viewportWidth, y = 0. Converting with the
+      // current scroll offsets yields container-relative coordinates that stay
+      // correct no matter when the decoration is added:
+      // left = (docX - scrollX) + (scrollX - pageIndex * viewportWidth)
+      //      = docX - pageIndex * viewportWidth
+      let finalXOffset = xOffset;
+      let finalYOffset = yOffset;
 
       if (style.width === "wrap") {
         if (
