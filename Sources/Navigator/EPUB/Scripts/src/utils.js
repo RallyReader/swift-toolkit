@@ -254,6 +254,95 @@ export function rectFromLocator(locator) {
 }
 
 /**
+ * Computes the rect actually painted by an element's CSS background image.
+ *
+ * Fixed-layout pages often draw the page scan as a background image that does
+ * not fill the whole element — e.g. a single cover/back-cover page centered in
+ * a full-spread container (`background-size: 554px 717px; background-position:
+ * center center` inside a 1108px-wide div). OCR overlay percentages are
+ * relative to the page image, so decorations must be resolved against the
+ * painted image rect, not the element rect.
+ *
+ * Returns null when there is no background image or when background-size
+ * doesn't resolve to explicit pixel values (auto/cover/contain).
+ */
+function getPaintedBackgroundImageRect(element) {
+  const style = window.getComputedStyle(element);
+  if (!style.backgroundImage || style.backgroundImage === "none") {
+    return null;
+  }
+
+  const sizeMatch = style.backgroundSize.match(/^([\d.]+)px\s+([\d.]+)px$/);
+  if (!sizeMatch) {
+    return null;
+  }
+  const imageWidth = parseFloat(sizeMatch[1]);
+  const imageHeight = parseFloat(sizeMatch[2]);
+  if (!(imageWidth > 0) || !(imageHeight > 0)) {
+    return null;
+  }
+
+  const elementRect = element.getBoundingClientRect();
+
+  // Percentage background-position resolves against (area size - image size).
+  function resolveOffset(component, extent) {
+    if (component.endsWith("%")) {
+      return (extent * parseFloat(component)) / 100;
+    }
+    return parseFloat(component) || 0;
+  }
+
+  const positions = style.backgroundPosition.split(" ");
+  const offsetX = resolveOffset(
+    positions[0] || "0%",
+    elementRect.width - imageWidth
+  );
+  const offsetY = resolveOffset(
+    positions[1] || "0%",
+    elementRect.height - imageHeight
+  );
+
+  const left = elementRect.left + offsetX;
+  const top = elementRect.top + offsetY;
+  return {
+    left,
+    top,
+    right: left + imageWidth,
+    bottom: top + imageHeight,
+    width: imageWidth,
+    height: imageHeight,
+  };
+}
+
+/**
+ * Returns the rect defining the OCR coordinate space for an ocr-container:
+ * - the img element's rect if one is present (handles scaled images);
+ * - otherwise the container's own rect;
+ * - when the container collapses to 0x0 (all children position:absolute),
+ *   the painted page image rect of the first non-overlay child with real
+ *   dimensions — typically the page reference div.
+ */
+function getOCRContainerRect(ocrContainer) {
+  const img = ocrContainer.querySelector("img");
+  if (img) {
+    return img.getBoundingClientRect();
+  }
+
+  let containerRect = ocrContainer.getBoundingClientRect();
+  if (containerRect.width <= 1 || containerRect.height <= 1) {
+    for (const child of ocrContainer.children) {
+      if (child.classList.contains("text-overlay")) continue;
+      const childRect = child.getBoundingClientRect();
+      if (childRect.width > 0 && childRect.height > 0) {
+        containerRect = getPaintedBackgroundImageRect(child) || childRect;
+        break;
+      }
+    }
+  }
+  return containerRect;
+}
+
+/**
  * Calculates the corrected rect for OCR text-overlay elements.
  * OCR text overlays use percentage-based positioning relative to a reference size,
  * which can be either:
@@ -291,30 +380,7 @@ export function getOCRCorrectedRect(range) {
     return null;
   }
 
-  // Try to find an image inside the container
-  const img = ocrContainer.querySelector("img");
-  let containerRect;
-
-  if (img) {
-    // If there's an image, use its bounding rect (handles scaled images)
-    containerRect = img.getBoundingClientRect();
-  } else {
-    containerRect = ocrContainer.getBoundingClientRect();
-
-    // When all children are position:absolute (e.g. text overlays + a page-size div),
-    // the inline-block container collapses to 0x0. Fall back to the first non-overlay
-    // child that has real dimensions — typically the page reference div.
-    if (containerRect.width <= 1 || containerRect.height <= 1) {
-      for (const child of ocrContainer.children) {
-        if (child.classList.contains("text-overlay")) continue;
-        const childRect = child.getBoundingClientRect();
-        if (childRect.width > 0 && childRect.height > 0) {
-          containerRect = childRect;
-          break;
-        }
-      }
-    }
-  }
+  const containerRect = getOCRContainerRect(ocrContainer);
 
   // Extract the percentage values from the text-overlay's inline style
   const styleTop = textOverlayElement.style.top;
@@ -389,24 +455,7 @@ export function getAllOCRCorrectedRects(range) {
   const ocrContainer = textOverlay.closest(".ocr-container");
   if (!ocrContainer) return null;
 
-  const img = ocrContainer.querySelector("img");
-  let containerRect;
-
-  if (img) {
-    containerRect = img.getBoundingClientRect();
-  } else {
-    containerRect = ocrContainer.getBoundingClientRect();
-    if (containerRect.width <= 1 || containerRect.height <= 1) {
-      for (const child of ocrContainer.children) {
-        if (child.classList.contains("text-overlay")) continue;
-        const childRect = child.getBoundingClientRect();
-        if (childRect.width > 0 && childRect.height > 0) {
-          containerRect = childRect;
-          break;
-        }
-      }
-    }
-  }
+  const containerRect = getOCRContainerRect(ocrContainer);
 
   if (containerRect.width <= 1 || containerRect.height <= 1) return null;
 
