@@ -51,6 +51,14 @@ final class WebView: WKWebView {
             && editingActions.canPerformAction(action)
     }
 
+    /// Rally: on Mac, AppKit validates menu commands here; disable any command that is not an allowed editing action.
+    override func validate(_ command: UICommand) {
+        if !editingActions.canPerformAction(command.action) {
+            command.attributes = .disabled
+        }
+        super.validate(command)
+    }
+
     override func copy(_ sender: Any?) {
         Task {
             await editingActions.copy()

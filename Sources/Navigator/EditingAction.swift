@@ -171,17 +171,22 @@ final class EditingActionsController {
 
     @available(iOS 13.0, *)
     func buildMenu(with builder: UIMenuBuilder) {
-        if !canPerformAction(.lookup) {
-            builder.remove(menu: .lookup)
-        }
-        if !canPerformAction(.share) {
-            builder.remove(menu: .share)
-        }
-
-        // Learn is removed as it seems bugged on iOS 17: it opens a Text
-        // Expansion setting which allows to copy the selection.
-        // To reproduce, comment out and select Japanese text on a PDF.
+        // Rally: remove all system menus so only the custom editing actions remain.
+        builder.remove(menu: .lookup)
+        builder.remove(menu: .share)
         builder.remove(menu: .learn)
+        builder.remove(menu: .standardEdit)
+        builder.remove(menu: .undoRedo)
+        builder.remove(menu: .find)
+        builder.remove(menu: .replace)
+        builder.remove(menu: .speech)
+        builder.remove(menu: .spelling)
+        builder.remove(menu: .substitutions)
+        builder.remove(menu: .transformations)
+        builder.remove(menu: .text)
+        if #available(iOS 17.0, *) {
+            builder.remove(menu: .autoFill)
+        }
 
         // Custom actions are inserted into the selection edit menu via
         // `buildMenu` only on iOS 16+, where `UIEditMenuInteraction` consults
@@ -209,7 +214,8 @@ final class EditingActionsController {
 
         if !customActions.isEmpty {
             let menu = UIMenu(title: "", options: .displayInline, children: customActions)
-            builder.insertChild(menu, atStartOfMenu: .standardEdit)
+            // Rally: `.standardEdit` was removed above.
+            builder.insertChild(menu, atStartOfMenu: .root)
         }
     }
 
