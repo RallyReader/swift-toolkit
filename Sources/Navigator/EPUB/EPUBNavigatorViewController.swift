@@ -720,6 +720,22 @@ open class EPUBNavigatorViewController: InputObservableViewController,
     /// Used to avoid sending twice the same location.
     private var notifiedCurrentLocation: Locator?
 
+    /// Rally: computes and notifies the current location at once (skipped while not idle, as upstream's).
+    private func notifyCurrentLocationNow() async {
+        guard state == .idle else {
+            return
+        }
+        (currentLocation, viewport) = await computeCurrentLocationAndViewport()
+        if
+            let delegate = delegate,
+            let location = currentLocation,
+            location != notifiedCurrentLocation
+        {
+            notifiedCurrentLocation = location
+            delegate.navigator(self, locationDidChange: location)
+        }
+    }
+
     private lazy var updateCurrentLocation = execute(
         // If we're not in an `idle` state, we postpone the notification.
         when: { [weak self] in self?.state == .idle },
@@ -758,6 +774,9 @@ open class EPUBNavigatorViewController: InputObservableViewController,
         if success {
             delegate?.navigator(self, didJumpTo: locator)
         }
+        // Rally: report the new location as soon as the jump ends, as 2.x did. Upstream's notification waits for an
+        // idle state, polled every 0.1 s, which lets the app's read-aloud see the old page after a chapter change.
+        Task { await self.notifyCurrentLocationNow() }
         return success
     }
 
@@ -876,16 +895,13 @@ open class EPUBNavigatorViewController: InputObservableViewController,
         }
     }
 
-    /// Rally: evaluates `script` in `spreadView`, answering on the main actor. A spread not loaded yet answers
-    /// `spreadNotLoaded` (2.7 evaluated at once and the page answered with an error) instead of waiting for it.
+    /// Rally: evaluates `script` in `spreadView` at once, as 2.x did (Readium 3 marks a spread loaded only after its
+    /// settings and decorations, later than its scripts are ready), answering on the main actor. A page whose
+    /// scripts are not ready answers with an error.
     private func evaluateRallyScript<H: URLConvertible>(_ script: String, in spreadView: EPUBSpreadView, href: H?, completion: @escaping (Result<Any, Error>) -> Void) {
-        guard spreadView.isSpreadLoaded else {
-            Task { completion(.failure(EPUBError.spreadNotLoaded)) }
-            return
-        }
         let href = href?.anyURL
         Task {
-            completion(await spreadView.evaluateScript(script, inHREF: href))
+            completion(await spreadView.evaluateScriptNow(script, inHREF: href))
         }
     }
 
@@ -1232,7 +1248,7 @@ open class EPUBNavigatorViewController: InputObservableViewController,
 
     /// Rally: the stored decorations change when this is called, in call order with `addDecorations` and `remove`
     /// (upstream changes them later, in a task, which would undo an `addDecorations` made right after); the scripts go
-    /// to the spreads whose decorations are installed, and a spread still loading re-adds the stored state.
+    /// to the loaded spread views at once, and a spread loading later re-adds the stored state (as in 2.x).
     public func apply(decorations: [Decoration], enhanced: Bool, in group: DecorationGroup) {
         let source = self.decorations[group] ?? []
         let target = decorations.map {
@@ -1309,14 +1325,15 @@ open class EPUBNavigatorViewController: InputObservableViewController,
     /// Rally: decoration rect callbacks, indexed by the group name.
     private var decorationRectsCallbacks: [DecorationGroup: [DecorableNavigator.OnRectCalculatedCallback]] = [:]
 
-    /// Rally: sends a decoration script to `spreadView` once its stored decorations are installed; before that, the
-    /// spread re-adds the stored state when it loads.
+    /// Rally: sends a decoration script to `spreadView` at once, as the 2.x navigator did (Readium 3 would wait until
+    /// the spread is marked loaded, after its scripts are ready, and the read-aloud waits for the marks' rects). A page
+    /// not ready yet drops it and re-adds the stored decorations when it loads.
     private func evaluateDecorationScript(_ script: String, in spreadView: EPUBSpreadView?, href: AnyURL? = nil) {
-        guard let spreadView = spreadView, spreadView.areDecorationsInstalled else {
+        guard let spreadView = spreadView else {
             return
         }
         Task {
-            await spreadView.evaluateScript(script, inHREF: href)
+            await spreadView.evaluateScriptNow(script, inHREF: href)
         }
     }
 
@@ -1532,7 +1549,6 @@ extension EPUBNavigatorViewController: EPUBSpreadViewDelegate {
             }
         }
 
-        spreadView.areDecorationsInstalled = true
         await spreadView.evaluateScript("(function() {\n\(script)\n})();")
 
         for link in links {

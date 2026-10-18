@@ -120,9 +120,17 @@ final class EPUBFixedSpreadView: EPUBSpreadView {
     }
 
     override func evaluateScript(_ script: String, inHREF href: AnyURL? = nil) async -> Result<Any, any Error> {
+        return await super.evaluateScript(Self.wrapperScript(script, inHREF: href))
+    }
+
+    override func evaluateScriptNow(_ script: String, inHREF href: AnyURL? = nil) async -> Result<Any, any Error> {
+        await evaluateRaw(Self.wrapperScript(script, inHREF: href))
+    }
+
+    /// The script, evaluated by the wrapper in the resource `href`'s frame.
+    private static func wrapperScript(_ script: String, inHREF href: AnyURL?) -> String {
         let href = href?.string ?? ""
-        let script = "spread.eval('\(href)', `\(script.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "`", with: "\\`"))`);"
-        return await super.evaluateScript(script)
+        return "spread.eval('\(href)', `\(script.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "`", with: "\\`"))`);"
     }
 
     override func convertPointToNavigatorSpace(_ point: CGPoint) -> CGPoint {

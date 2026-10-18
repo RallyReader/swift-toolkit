@@ -68,10 +68,6 @@ class EPUBSpreadView: UIView, Loggable, PageView, PageViewMemoryReleasable {
     private var activityIndicatorStopWorkItem: DispatchWorkItem?
 
     private(set) var isSpreadLoaded = false
-
-    /// Rally: set once the navigator has built the script that re-adds the stored decorations to this spread; from
-    /// then on, decoration changes are sent to the spread instead of waiting for it.
-    var areDecorationsInstalled = false
     private var spreadLoadTask: Task<Void, Never>?
 
     required init(
@@ -211,7 +207,17 @@ class EPUBSpreadView: UIView, Loggable, PageView, PageViewMemoryReleasable {
     @discardableResult
     func evaluateScript(_ script: String, inHREF href: AnyURL? = nil) async -> Result<Any, Error> {
         await spreadLoaded()
+        return await evaluateRaw(script)
+    }
 
+    /// Rally: evaluates the script at once, without waiting for the spread to be loaded — as the 2.x navigator did. A
+    /// page whose scripts are not ready yet answers with an error.
+    func evaluateScriptNow(_ script: String, inHREF href: AnyURL? = nil) async -> Result<Any, Error> {
+        await evaluateRaw(script)
+    }
+
+    /// Evaluates `script` in the web view as it is.
+    final func evaluateRaw(_ script: String) async -> Result<Any, Error> {
         log(.trace, "Evaluate script: \(script)")
         return await withCheckedContinuation { continuation in
             webView.evaluateJavaScript(script) { [weak self] res, error in
