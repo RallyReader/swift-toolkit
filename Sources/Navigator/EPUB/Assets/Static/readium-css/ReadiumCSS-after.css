@@ -159,6 +159,13 @@ body {
   box-sizing: border-box;
 }
 
+/* Rally safeguard: prevent oversized author margins on h1 (e.g. margin-left/right in em)
+   from collapsing the heading box and overflowing onto body text on narrow screens. */
+h1 {
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+
 /* We’ll now redefine margins and columns depending on the minimum width available
    The goal is having the simplest model possible and avoid targeting devices */
 

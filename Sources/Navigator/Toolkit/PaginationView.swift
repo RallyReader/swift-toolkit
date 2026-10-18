@@ -7,6 +7,20 @@
 import ReadiumShared
 import UIKit
 
+/// Rally: ignores touches in the top and bottom 44 points, where the spreads' insets are, so a vertical drag there
+/// does not turn to another chapter instead of scrolling the chapter's pages (44 covers regular 44 and compact 20).
+/// Not on Mac, where trackpad scrolls use synthetic hit testing that these zones would reject.
+class CustomScrollView: UIScrollView {
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        if !ProcessInfo.processInfo.isiOSAppOnMac {
+            if point.y < 44 || point.y > frame.height - 44 {
+                return nil
+            }
+        }
+        return super.hitTest(point, with: event)
+    }
+}
+
 enum PageLocation: Equatable {
     case start
     case end
@@ -34,6 +48,11 @@ protocol PageView {
     func go(to location: PageLocation, animated: Bool) async
 }
 
+/// Rally: a page view that frees its heavyweight resources when it leaves the preload window.
+protocol PageViewMemoryReleasable {
+    func releaseMemory()
+}
+
 protocol PaginationViewDelegate: AnyObject {
     /// Creates the page view for the page at given index.
     func paginationView(_ paginationView: PaginationView, pageViewAtIndex index: Int) -> (UIView & PageView)?
@@ -43,6 +62,12 @@ protocol PaginationViewDelegate: AnyObject {
 
     /// Returns the number of positions (as in `Publication.positionList`) in the page view at given index.
     func paginationView(_ paginationView: PaginationView, positionCountAtIndex index: Int) -> Int
+
+    /// Rally: called when the user will begin dragging the scroll view.
+    func paginationViewScrollViewWillBeginDragging(_ paginationView: PaginationView)
+
+    /// Rally: called when the scroll view did end decelerating.
+    func paginationViewScrollViewDidEndDecelerating(_ paginationView: PaginationView)
 }
 
 final class PaginationView: UIView, Loggable {
@@ -91,7 +116,7 @@ final class PaginationView: UIView, Loggable {
         return orderedViews
     }
 
-    private let scrollView = UIScrollView()
+    private let scrollView = CustomScrollView()
 
     /// Set while a transition animation is in progress to prevent
     /// `layoutSubviews` from resetting `contentOffset` and interrupting the
@@ -132,6 +157,13 @@ final class PaginationView: UIView, Loggable {
         insertSubview(UIView(frame: .zero), at: 0)
         // Prevents the content from jumping down when the status bar is toggled
         scrollView.contentInsetAdjustmentBehavior = .never
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(didReceiveMemoryWarning),
+            name: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil
+        )
     }
 
     @available(*, unavailable)
@@ -163,7 +195,7 @@ final class PaginationView: UIView, Loggable {
         if newSuperview == nil {
             // Remove all spread views to break retain cycles
             for (_, view) in loadedViews {
-                view.removeFromSuperview()
+                unload(view)
             }
             loadedViews.removeAll()
         }
@@ -201,7 +233,7 @@ final class PaginationView: UIView, Loggable {
         self.readingProgression = readingProgression
 
         for (_, view) in loadedViews {
-            view.removeFromSuperview()
+            unload(view)
         }
         loadedViews.removeAll()
         loadingIndexQueue.removeAll()
@@ -232,13 +264,30 @@ final class PaginationView: UIView, Loggable {
         for (i, view) in loadedViews {
             // Flushes the views that are not needed anymore.
             guard firstIndex ... lastIndex ~= i else {
-                view.removeFromSuperview()
+                unload(view)
                 loadedViews.removeValue(forKey: i)
                 continue
             }
         }
 
         loadPages()
+    }
+
+    /// Rally: releases a page view's resources before removing it.
+    private func unload(_ view: UIView & PageView) {
+        (view as? PageViewMemoryReleasable)?.releaseMemory()
+        view.removeFromSuperview()
+    }
+
+    /// Rally: on a memory warning, keeps only the current page view.
+    @objc private func didReceiveMemoryWarning() {
+        loadingIndexQueue.removeAll()
+
+        let preloadedViews = loadedViews.filter { index, _ in index != currentIndex }
+        for (index, view) in preloadedViews {
+            unload(view)
+            loadedViews.removeValue(forKey: index)
+        }
     }
 
     private func loadPages() {
@@ -447,7 +496,15 @@ extension PaginationView: UIScrollViewDelegate {
     // https://oleb.net/blog/2014/05/scrollviews-inside-scrollviews/
 
     func scrollViewWillEndDragging(_ scrollView: UIScrollView, withVelocity velocity: CGPoint, targetContentOffset: UnsafeMutablePointer<CGPoint>) {
-        scrollView.isScrollEnabled = false
+        // Rally: not on Mac, where disabling the scroll here can keep a trackpad swipe from completing (the
+        // deceleration may never end with scrollViewDidEndDecelerating).
+        if !ProcessInfo.processInfo.isiOSAppOnMac {
+            scrollView.isScrollEnabled = false
+        }
+    }
+
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        delegate?.paginationViewScrollViewWillBeginDragging(self)
     }
 
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
@@ -474,5 +531,7 @@ extension PaginationView: UIScrollViewDelegate {
 
         let newIndex = Int(round(currentOffset / scrollView.frame.width))
         setCurrentIndex(newIndex)
+
+        delegate?.paginationViewScrollViewDidEndDecelerating(self)
     }
 }
