@@ -18,17 +18,32 @@ type Match = {
  * Find the best approximate matches for `str` in `text` allowing up to
  * `maxErrors` errors.
  */
-function search(text: string, str: string, maxErrors: number): StringMatch[] {
+function search(
+  text: string,
+  str: string,
+  maxErrors: number,
+  approximateStart: number | null = null,
+  approximateEnd: number | null = null,
+): StringMatch[] {
+  // Rally: when the caller knows roughly where the quote is, the exact search
+  // is limited to that window (offsets in `text`); the approximate search
+  // below still covers the whole text.
+  let searchText = text;
+  if (approximateStart !== null && approximateEnd !== null) {
+    searchText = text.slice(approximateStart, approximateEnd);
+  }
+  const offset = approximateStart !== null ? approximateStart : 0;
+
   // Do a fast search for exact matches. The `approx-string-match` library
   // doesn't currently incorporate this optimization itself.
   let matchPos = 0;
   const exactMatches: StringMatch[] = [];
   while (matchPos !== -1) {
-    matchPos = text.indexOf(str, matchPos);
+    matchPos = searchText.indexOf(str, matchPos);
     if (matchPos !== -1) {
       exactMatches.push({
-        start: matchPos,
-        end: matchPos + str.length,
+        start: matchPos + offset,
+        end: matchPos + str.length + offset,
         errors: 0,
       });
       matchPos += 1;
@@ -82,6 +97,8 @@ export function matchQuote(
   text: string,
   quote: string,
   context: Context = {},
+  approximateStart: number | null = null,
+  approximateEnd: number | null = null,
 ): Match | null {
   if (quote.length === 0) {
     return null;
@@ -99,7 +116,7 @@ export function matchQuote(
   const maxErrors = Math.min(256, quote.length / 2);
 
   // Find the closest matches for `quote` in `text` based on edit distance.
-  const matches = search(text, quote, maxErrors);
+  const matches = search(text, quote, maxErrors, approximateStart, approximateEnd);
 
   if (matches.length === 0) {
     return null;

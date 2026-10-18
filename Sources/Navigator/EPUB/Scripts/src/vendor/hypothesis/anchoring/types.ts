@@ -232,20 +232,38 @@ export class TextQuoteAnchor {
     };
   }
 
-  toRange(options: QuoteMatchOptions = {}): Range {
-    return this.toPositionAnchor(options).toRange();
+  /**
+   * Rally: `approximateStart` and `approximateEnd` limit the exact search to a
+   * window of the rendered text (see `matchQuote`).
+   */
+  toRange(
+    options: QuoteMatchOptions = {},
+    approximateStart: number | null = null,
+    approximateEnd: number | null = null,
+  ): Range {
+    return this.toPositionAnchor(options, approximateStart, approximateEnd).toRange();
   }
 
-  toPositionAnchor(options: QuoteMatchOptions = {}): TextPositionAnchor {
+  toPositionAnchor(
+    options: QuoteMatchOptions = {},
+    approximateStart: number | null = null,
+    approximateEnd: number | null = null,
+  ): TextPositionAnchor {
     // Match against rendered text (with `<br>` substituted by a space), the
     // same representation used when the selector was created. Then
     // translate the match offsets back to raw `textContent` positions for
     // `TextPositionAnchor`.
     const { text, brPositionsInText } = renderedTextOf(this.root);
-    const match = matchQuote(text, this.exact, {
-      ...this.context,
-      hint: options.hint,
-    });
+    const match = matchQuote(
+      text,
+      this.exact,
+      {
+        ...this.context,
+        hint: options.hint,
+      },
+      approximateStart,
+      approximateEnd,
+    );
     if (!match) {
       throw new Error('Quote not found');
     }
