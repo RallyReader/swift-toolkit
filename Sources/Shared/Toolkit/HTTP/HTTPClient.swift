@@ -116,6 +116,15 @@ public extension HTTPClient {
         let result = await stream(
             request: request,
             consume: { data, progression in
+                // Rally: stop before the disk is full, with the POSIX error the app recognises (RR-5754).
+                if Int64(data.count) > availableStorage() {
+                    try? fileHandle.close()
+                    let diskError = NSError(domain: NSPOSIXErrorDomain, code: Int(ENOSPC), userInfo: [
+                        NSLocalizedDescriptionKey: "Not enough disk space to complete the download.",
+                    ])
+                    return .failure(.fileSystem(.io(diskError)))
+                }
+
                 do {
                     try fileHandle.seekToEnd()
                     try fileHandle.write(contentsOf: data)
@@ -147,6 +156,15 @@ public extension HTTPClient {
             }
             return .failure(error)
         }
+    }
+
+    /// Rally: the space left for important data, minus 100 MB kept free; 0 when it is unknown.
+    private func availableStorage() -> Int64 {
+        let values = try? URL(fileURLWithPath: "/").resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+        guard let capacity = values?.volumeAvailableCapacityForImportantUsage else {
+            return 0
+        }
+        return capacity - 100 * 1024 * 1024
     }
 }
 
