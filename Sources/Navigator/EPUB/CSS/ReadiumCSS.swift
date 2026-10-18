@@ -118,9 +118,9 @@ extension ReadiumCSS: HTMLInjectable {
             href: stylesheetsFolder.appendingPath("ReadiumCSS-before.css", isDirectory: false).string,
             prepend: true
         ))
-        if !hasStyles {
-            inj.append(.stylesheetLink(href: stylesheetsFolder.appendingPath("ReadiumCSS-default.css", isDirectory: false).string))
-        }
+        // Rally: the default stylesheet for books without styles is not injected. The 2.x fork's link to it never
+        // applied (unstyled books showed WebKit's own paragraph styles), and readers' books keep the same layout.
+        _ = hasStyles
         inj.append(.stylesheetLink(href: stylesheetsFolder.appendingPath("ReadiumCSS-after.css", isDirectory: false).string))
 
         // Fix Readium CSS issue with the positioning of <audio> elements.
