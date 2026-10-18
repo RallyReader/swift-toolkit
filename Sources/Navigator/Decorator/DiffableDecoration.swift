@@ -17,12 +17,14 @@ struct DiffableDecoration: Hashable, Differentiable {
 
 enum DecorationChange {
     case add(Decoration)
+    /// Rally: adds the decoration with the enhanced code path.
+    case addEnhanced(Decoration)
     case remove(Decoration.Id)
     case update(Decoration)
 }
 
 extension Array where Element == DiffableDecoration {
-    func changesByHREF(from source: [DiffableDecoration]) -> [AnyURL: [DecorationChange]] {
+    func changesByHREF(from source: [DiffableDecoration], enhanced: Bool = false) -> [AnyURL: [DecorationChange]] {
         let changeset = StagedChangeset(source: source, target: self)
 
         var changes: [AnyURL: [DecorationChange]] = [:]
@@ -40,7 +42,7 @@ extension Array where Element == DiffableDecoration {
             }
             for inserted in change.elementInserted {
                 let decoration = self[inserted.element].decoration
-                register(.add(decoration), at: decoration.locator)
+                register(enhanced ? .addEnhanced(decoration) : .add(decoration), at: decoration.locator)
             }
             for updated in change.elementUpdated {
                 let decoration = self[updated.element].decoration

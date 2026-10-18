@@ -34,6 +34,24 @@ public protocol DecorableNavigator {
 
     /// Called when the user activates a decoration, e.g. with a click or tap.
     typealias OnActivatedCallback = (_ event: OnDecorationActivatedEvent) -> Void
+
+    // MARK: - Rally
+
+    /// Rally: declares the decorations of `group`, as `apply(decorations:in:)`; `enhanced` draws them with the
+    /// enhanced (OCR and enhanced-layout) code path.
+    func apply(decorations: [Decoration], enhanced: Bool, in group: DecorationGroup)
+
+    /// Rally: adds decorations to `group` without diffing the existing ones, so it stays fast when the group is big.
+    func addDecorations(decorations: [Decoration], enhanced: Bool, in group: DecorationGroup, completion: @escaping () -> Void)
+
+    /// Rally: removes one enhanced decoration from `group`.
+    func remove(decoration: Decoration, in group: DecorationGroup)
+
+    /// Rally: registers a callback for the rects calculated for the decorations of `group`.
+    func observeDecorationRectCalculations(inGroup group: DecorationGroup, onActivated: OnRectCalculatedCallback?)
+
+    /// Rally: called when a decoration's rect was calculated.
+    typealias OnRectCalculatedCallback = (_ event: OnDecorationRectEvent) -> Void
 }
 
 /// Identifies a decoration group.
@@ -54,6 +72,18 @@ public struct OnDecorationActivatedEvent {
     /// Event point of the interaction, in the coordinate of the navigator view. This is only useful in the context of a
     /// VisualNavigator.
     public let point: CGPoint?
+}
+
+/// Rally: a decoration's rect, as calculated by the web view.
+public struct OnDecorationRectEvent {
+    /// The decoration.
+    public let decorationId: Decoration.Id
+    /// Name of the group the decoration belongs to.
+    public let group: DecorationGroup
+    /// Frame of the bounding rect for the decoration, in the coordinate of the navigator view.
+    public let rect: CGRect?
+    /// Whether the decoration is laid out over an OCR container.
+    public let ocrLayout: Bool
 }
 
 /// A decoration is a user interface element drawn on top of a publication. It associates a `style` to be rendered with
@@ -140,6 +170,10 @@ public struct Decoration: Hashable, JSONObjectEncodable {
             "id": id,
             "locator": locator,
             "style": style.id,
+            // Rally: the JavaScript reads `userInfo` (e.g. `enhancedLayout`).
+            "userInfo": JSONValue(Dictionary(uniqueKeysWithValues: userInfo.compactMap { key, value in
+                (key.base as? String).map { ($0, value.base) }
+            })),
         ])
     }
 }

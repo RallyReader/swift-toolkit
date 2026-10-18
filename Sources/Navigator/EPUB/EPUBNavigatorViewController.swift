@@ -17,10 +17,25 @@ import WebKit
     // MARK: - WebView Customization
 
     func navigator(_ navigator: EPUBNavigatorViewController, setupUserScripts userContentController: WKUserContentController)
+
+    // MARK: - Rally
+
+    /// Rally: a spread finished loading and its stored decorations were re-added; called once per resource.
+    func spreadViewDidLoad(href: AnyURL)
+
+    /// Rally: the user will begin dragging the content.
+    func navigatorScrollViewWillBeginDragging(_ navigator: EPUBNavigatorViewController)
+
+    /// Rally: the content did end decelerating.
+    func navigatorScrollViewDidEndDecelerating(_ navigator: EPUBNavigatorViewController)
 }
 
 public extension EPUBNavigatorDelegate {
     func navigator(_ navigator: EPUBNavigatorViewController, setupUserScripts userContentController: WKUserContentController) {}
+
+    func spreadViewDidLoad(href: AnyURL) {}
+    func navigatorScrollViewWillBeginDragging(_ navigator: EPUBNavigatorViewController) {}
+    func navigatorScrollViewDidEndDecelerating(_ navigator: EPUBNavigatorViewController) {}
 }
 
 public typealias EPUBContentInsets = (top: CGFloat, bottom: CGFloat)
@@ -453,8 +468,9 @@ open class EPUBNavigatorViewController: InputObservableViewController,
 
     @available(iOS 13.0, *)
     override open func buildMenu(with builder: UIMenuBuilder) {
-        viewModel.editingActions.buildMenu(with: builder)
+        // Rally: after super, so the system menus it adds are removed.
         super.buildMenu(with: builder)
+        viewModel.editingActions.buildMenu(with: builder)
     }
 
     override open func viewWillAppear(_ animated: Bool) {
@@ -778,6 +794,410 @@ open class EPUBNavigatorViewController: InputObservableViewController,
         return await go(to: direction, options: options)
     }
 
+    // MARK: - Rally queries
+
+    /// Rally: words and characters read up to a locator in its resource.
+    public struct LocatorReadingProgress: Equatable {
+        public let readWords: Int
+        public let totalWords: Int
+        public let readCharacters: Int
+        public let totalCharacters: Int
+        public let wordsPercentage: Double
+        public let charactersPercentage: Double
+
+        public init(
+            readWords: Int,
+            totalWords: Int,
+            readCharacters: Int,
+            totalCharacters: Int,
+            wordsPercentage: Double,
+            charactersPercentage: Double
+        ) {
+            self.totalWords = max(0, totalWords)
+            self.totalCharacters = max(0, totalCharacters)
+            self.readWords = min(max(0, readWords), self.totalWords)
+            self.readCharacters = min(max(0, readCharacters), self.totalCharacters)
+            self.wordsPercentage = min(max(wordsPercentage, 0), 100)
+            self.charactersPercentage = min(max(charactersPercentage, 0), 100)
+        }
+
+        init?(json: [String: Any]) {
+            guard
+                let readWords = Self.intValue(from: json["readWords"]),
+                let totalWords = Self.intValue(from: json["totalWords"]),
+                let readCharacters = Self.intValue(from: json["readCharacters"]),
+                let totalCharacters = Self.intValue(from: json["totalCharacters"])
+            else {
+                return nil
+            }
+
+            let computedWordsPercentage = totalWords > 0 ? (Double(readWords) / Double(totalWords)) * 100.0 : 0
+            let computedCharactersPercentage = totalCharacters > 0 ? (Double(readCharacters) / Double(totalCharacters)) * 100.0 : 0
+            self.init(
+                readWords: readWords,
+                totalWords: totalWords,
+                readCharacters: readCharacters,
+                totalCharacters: totalCharacters,
+                wordsPercentage: Self.doubleValue(from: json["wordsPercentage"]) ?? computedWordsPercentage,
+                charactersPercentage: Self.doubleValue(from: json["charactersPercentage"]) ?? computedCharactersPercentage
+            )
+        }
+
+        private static func intValue(from value: Any?) -> Int? {
+            if let intValue = value as? Int {
+                return intValue
+            }
+            if let doubleValue = value as? Double {
+                return Int(doubleValue)
+            }
+            if let number = value as? NSNumber {
+                return number.intValue
+            }
+            if let string = value as? String, let intValue = Int(string) {
+                return intValue
+            }
+            return nil
+        }
+
+        private static func doubleValue(from value: Any?) -> Double? {
+            if let doubleValue = value as? Double {
+                return doubleValue
+            }
+            if let intValue = value as? Int {
+                return Double(intValue)
+            }
+            if let number = value as? NSNumber {
+                return number.doubleValue
+            }
+            if let string = value as? String, let doubleValue = Double(string) {
+                return doubleValue
+            }
+            return nil
+        }
+    }
+
+    /// Rally: evaluates `script` in `spreadView`, answering on the main actor. A spread not loaded yet answers
+    /// `spreadNotLoaded` (2.7 evaluated at once and the page answered with an error) instead of waiting for it.
+    private func evaluateRallyScript<H: URLConvertible>(_ script: String, in spreadView: EPUBSpreadView, href: H?, completion: @escaping (Result<Any, Error>) -> Void) {
+        guard spreadView.isSpreadLoaded else {
+            Task { completion(.failure(EPUBError.spreadNotLoaded)) }
+            return
+        }
+        let href = href?.anyURL
+        Task {
+            completion(await spreadView.evaluateScript(script, inHREF: href))
+        }
+    }
+
+    /// Rally: a text locator in `href` from a `{ text: … }` result of the fork's JavaScript.
+    private func textLocator<H: URLConvertible>(in href: H, from result: Result<Any, Error>) -> Locator? {
+        switch result {
+        case let .success(value):
+            guard
+                let selection = value as? [String: Any],
+                let text = try? Locator.Text(json: JSONValue(selection["text"]))
+            else {
+                return nil
+            }
+            return Locator(href: href, mediaType: .html, text: text)
+        case let .failure(error):
+            log(.error, error)
+            return nil
+        }
+    }
+
+    /// Rally: the rect of `locator` (`readium.clientRectFromLocator`), in the navigator's space when `convertRect`.
+    /// As in 2.7, `completion` is not called when the resource is not loaded or the JavaScript returns no rect.
+    public func getRectFromLocator(_ locator: Locator, convertRect: Bool = true, reset: Bool = false, cache: Bool = true, completion: @escaping (CGRect?) -> Void) {
+        guard let locatorJSON = try? locator.jsonString() else {
+            completion(nil)
+            return
+        }
+        guard let spreadView = loadedSpreadViewForHREF(locator.href) else {
+            return
+        }
+        let script = "readium.clientRectFromLocator(\(locatorJSON), \(reset ? 1 : 0), \(cache ? 1 : 0))"
+        evaluateRallyScript(script, in: spreadView, href: locator.href) { [weak self, weak spreadView] result in
+            switch result {
+            case let .success(value):
+                if let frame = CGRect(json: value) {
+                    completion(convertRect ? spreadView?.convertRectToNavigatorSpace(frame) : frame)
+                }
+            case let .failure(error):
+                self?.log(.error, error)
+                completion(nil)
+            }
+        }
+    }
+
+    /// Rally: the text of each page of a reflowable resource, in page order (`readium.calculateHorizontalPageRanges`).
+    public func getPageRanges<H: URLConvertible>(_ href: H, completion: @escaping ([String]) -> Void) {
+        guard let spreadView = loadedSpreadViewForHREF(href) else {
+            completion([])
+            return
+        }
+        evaluateRallyScript("readium.calculateHorizontalPageRanges()", in: spreadView, href: href) { [weak self] result in
+            var pages = [String]()
+            switch result {
+            case let .success(value):
+                if let json = value as? [String: String] {
+                    let keys = json.keys.sorted { Int($0) ?? 0 < Int($1) ?? 0 }
+                    for key in keys {
+                        if let page = json[key] {
+                            pages.append(page)
+                        }
+                    }
+                }
+            case let .failure(error):
+                self?.log(.error, error)
+            }
+            completion(pages)
+        }
+    }
+
+    /// Rally: runs a script answering `{ text: … }` in the loaded resource `href`.
+    private func textLocatorQuery<H: URLConvertible>(_ script: String, href: H, completion: @escaping (Locator?) -> Void) {
+        guard let spreadView = loadedSpreadViewForHREF(href) else {
+            completion(nil)
+            return
+        }
+        evaluateRallyScript(script, in: spreadView, href: href) { [weak self] result in
+            completion(self?.textLocator(in: href, from: result))
+        }
+    }
+
+    /// Rally: the first word visible in `href`.
+    public func getFirstWordLocatorFromVisiblePage<H: URLConvertible>(href: H, completion: @escaping (Locator?) -> Void) {
+        textLocatorQuery("readium.getFirstVisibleWordText()", href: href, completion: completion)
+    }
+
+    /// Rally: the last word visible in `href`.
+    public func getLastWordLocatorFromVisiblePage<H: URLConvertible>(href: H, completion: @escaping (Locator?) -> Void) {
+        textLocatorQuery("readium.getLastVisibleWordText()", href: href, completion: completion)
+    }
+
+    /// Rally: the last word of the resource `href`.
+    public func getLastWordLocatorFromHref<H: URLConvertible>(_ href: H, completion: @escaping (Locator?) -> Void) {
+        textLocatorQuery("readium.getLastWordText()", href: href, completion: completion)
+    }
+
+    /// Rally: words and characters read up to `locator` in its resource.
+    public func getReadingProgressForLocator(_ locator: Locator, completion: @escaping (LocatorReadingProgress?) -> Void) {
+        guard
+            let locatorJSON = try? locator.jsonString(),
+            let spreadView = loadedSpreadViewForHREF(locator.href)
+        else {
+            completion(nil)
+            return
+        }
+        evaluateRallyScript("readium.getReadingProgressForLocator(\(locatorJSON))", in: spreadView, href: locator.href) { [weak self] result in
+            switch result {
+            case let .success(value):
+                completion((value as? [String: Any]).flatMap { LocatorReadingProgress(json: $0) })
+            case let .failure(error):
+                self?.log(.error, error)
+                completion(nil)
+            }
+        }
+    }
+
+    /// Rally: runs a script answering a string in the loaded resource `href`.
+    private func stringQuery<H: URLConvertible>(_ script: String, href: H, completion: @escaping (String?) -> Void) {
+        guard let spreadView = loadedSpreadViewForHREF(href) else {
+            completion(nil)
+            return
+        }
+        evaluateRallyScript(script, in: spreadView, href: href) { [weak self] result in
+            switch result {
+            case let .success(value):
+                completion(value as? String)
+            case let .failure(error):
+                self?.log(.error, error)
+                completion(nil)
+            }
+        }
+    }
+
+    /// Rally: the text of the resource's body (`readium.getHtmlBodyTextContent`).
+    public func getHtmlBodyTextContent<H: URLConvertible>(href: H, completion: @escaping (String?) -> Void) {
+        stringQuery("readium.getHtmlBodyTextContent()", href: href, completion: completion)
+    }
+
+    /// Rally: the visible text of the resource.
+    public func getVisibleText<H: URLConvertible>(href: H, completion: @escaping (String?) -> Void) {
+        stringQuery("readium.getVisibleText()", href: href, completion: completion)
+    }
+
+    /// Rally: the range of the visible text in the resource's text.
+    public func getVisibleTextRange<H: URLConvertible>(href: H, completion: @escaping (NSRange?) -> Void) {
+        guard let spreadView = loadedSpreadViewForHREF(href) else {
+            completion(nil)
+            return
+        }
+        evaluateRallyScript("readium.getVisibleTextRange()", in: spreadView, href: href) { [weak self] result in
+            switch result {
+            case let .success(value):
+                if
+                    let dict = value as? [String: Int],
+                    let location = dict["location"],
+                    let length = dict["length"]
+                {
+                    completion(NSRange(location: location, length: length))
+                } else {
+                    completion(nil)
+                }
+            case let .failure(error):
+                self?.log(.error, error)
+                completion(nil)
+            }
+        }
+    }
+
+    /// Rally: whether the loaded resource `href` is shown in a fixed-layout spread; nil when it is not loaded.
+    public func spreadHasFixedLayout<H: URLConvertible>(href: H) -> Bool? {
+        loadedSpreadViewForHREF(href).map { $0 is EPUBFixedSpreadView }
+    }
+
+    /// Rally: whether the current spread's scroll view shows its last page.
+    public func currentSpreadDisplayingLastPage() -> Bool {
+        guard let spreadView = paginationView?.currentView as? EPUBSpreadView else {
+            return false
+        }
+        let offset = spreadView.scrollView.contentOffset.x
+        let contentWidth = spreadView.scrollView.contentSize.width
+        let pageWidth = spreadView.scrollView.bounds.width
+        return offset + pageWidth >= contentWidth
+    }
+
+    /// Rally: whether the current spread shows two fixed-layout pages side by side and one of them is `href`, so there
+    /// is no need to navigate to it.
+    public func currentTwoPageFixedSpreadContains<H: URLConvertible>(href: H) -> Bool {
+        guard
+            let spreadView = paginationView?.currentView as? EPUBSpreadView,
+            spreadView is EPUBFixedSpreadView,
+            viewModel.spreadEnabled
+        else {
+            return false
+        }
+        return spreadView.spread.linkWithHREF(href) != nil
+    }
+
+    // MARK: - Rally start page side selection
+
+    public enum ReaderStartPage {
+        case visible
+        case left
+        case right
+    }
+
+    public struct StartPageLayout {
+        public let isTwoUp: Bool
+        public let isFixedLayout: Bool
+        public let leftHref: AnyURL?
+        public let rightHref: AnyURL?
+
+        public init(isTwoUp: Bool, isFixedLayout: Bool, leftHref: AnyURL?, rightHref: AnyURL?) {
+            self.isTwoUp = isTwoUp
+            self.isFixedLayout = isFixedLayout
+            self.leftHref = leftHref
+            self.rightHref = rightHref
+        }
+    }
+
+    /// Rally: whether the current spread shows two pages, and the resources on its left and right.
+    public func currentStartPageLayout(completion: @escaping (StartPageLayout) -> Void) {
+        guard let spreadView = paginationView?.currentView as? EPUBSpreadView else {
+            completion(StartPageLayout(isTwoUp: false, isFixedLayout: false, leftHref: nil, rightHref: nil))
+            return
+        }
+
+        if spreadView is EPUBFixedSpreadView {
+            switch spreadView.spread {
+            case let .double(spread):
+                completion(StartPageLayout(
+                    isTwoUp: true,
+                    isFixedLayout: true,
+                    leftHref: spread.left(for: viewModel.readingProgression).link.url(),
+                    rightHref: spread.right(for: viewModel.readingProgression).link.url()
+                ))
+            case let .single(spread):
+                completion(StartPageLayout(isTwoUp: false, isFixedLayout: true, leftHref: spread.resource.link.url(), rightHref: nil))
+            }
+        } else {
+            let href = spreadView.spread.first.link.url()
+            evaluateRallyScript("readium.getColumnCountPerScreen()", in: spreadView, href: href) { result in
+                var isTwoUp = false
+                if let value = try? result.get() as? Int, value >= 2 {
+                    isTwoUp = true
+                } else if let value = try? result.get() as? String, Int(value) ?? 0 >= 2 {
+                    isTwoUp = true
+                }
+                completion(StartPageLayout(isTwoUp: isTwoUp, isFixedLayout: false, leftHref: href, rightHref: isTwoUp ? href : nil))
+            }
+        }
+    }
+
+    /// Rally: the first visible word of `href`, on the given side of a two-column page.
+    public func getFirstWordLocatorFromVisiblePage<H: URLConvertible>(href: H, side: ReaderStartPage, completion: @escaping (Locator?) -> Void) {
+        switch side {
+        case .visible:
+            getFirstWordLocatorFromVisiblePage(href: href, completion: completion)
+        case .left, .right:
+            let sideArg = side == .left ? "left" : "right"
+            textLocatorQuery("readium.getFirstVisibleWordTextOnSide('\(sideArg)')", href: href, completion: completion)
+        }
+    }
+
+    /// Rally: the first word of the given page of the current spread.
+    public func getFirstWordLocatorForStartPage(side: ReaderStartPage, completion: @escaping (Locator?) -> Void) {
+        currentStartPageLayout { [weak self] layout in
+            guard let self = self else {
+                completion(nil)
+                return
+            }
+            switch side {
+            case .visible:
+                if let href = layout.leftHref {
+                    self.getFirstWordLocatorFromVisiblePage(href: href, completion: completion)
+                } else {
+                    completion(nil)
+                }
+            case .left:
+                if let href = layout.leftHref {
+                    if layout.isFixedLayout {
+                        self.getFirstWordLocatorFromVisiblePage(href: href, completion: completion)
+                    } else {
+                        self.getFirstWordLocatorFromVisiblePage(href: href, side: .left, completion: completion)
+                    }
+                } else {
+                    completion(nil)
+                }
+            case .right:
+                if let href = layout.rightHref {
+                    if layout.isFixedLayout {
+                        self.getFirstWordLocatorFromVisiblePage(href: href, completion: completion)
+                    } else {
+                        self.getFirstWordLocatorFromVisiblePage(href: href, side: .right, completion: completion)
+                    }
+                } else {
+                    completion(nil)
+                }
+            }
+        }
+    }
+
+    /// Rally: the scroll view of the loaded spread showing `href`.
+    public func scrollViewInsideSpreadView<H: URLConvertible>(forHREF href: H) -> UIScrollView? {
+        loadedSpreadViewForHREF(href)?.scrollView
+    }
+
+    /// Rally: the scroll views of every loaded spread.
+    public func allLoadedScrollViews() -> [UIScrollView] {
+        (paginationView?.loadedViews ?? [:]).compactMap { _, view in
+            (view as? EPUBSpreadView)?.scrollView
+        }
+    }
+
     // MARK: - SelectableNavigator
 
     public var currentSelection: Selection? {
@@ -801,77 +1221,103 @@ open class EPUBNavigatorViewController: InputObservableViewController,
     /// Decoration group callbacks, indexed by the group name.
     private var decorationCallbacks: [DecorationGroup: [DecorableNavigator.OnActivatedCallback]] = [:]
 
-    /// Pending decoration tasks, indexed by group name. Stored to allow
-    /// cancellation when a new `apply(decorations:in:)` call supersedes a
-    /// previous one.
-    private var decorationTasks: [DecorationGroup: Task<Void, Never>] = [:]
 
     public func supports(decorationStyle style: Decoration.Style.Id) -> Bool {
         config.decorationTemplates.keys.contains(style)
     }
 
     public func apply(decorations: [Decoration], in group: DecorationGroup) {
-        decorationTasks[group]?.cancel()
-        var task: Task<Void, Never>?
-        task = Task { [weak self] in
-            defer {
-                if let self, self.decorationTasks[group] == task {
-                    self.decorationTasks[group] = nil
-                }
+        apply(decorations: decorations, enhanced: false, in: group)
+    }
+
+    /// Rally: the stored decorations change when this is called, in call order with `addDecorations` and `remove`
+    /// (upstream changes them later, in a task, which would undo an `addDecorations` made right after); the scripts go
+    /// to the spreads whose decorations are installed, and a spread still loading re-adds the stored state.
+    public func apply(decorations: [Decoration], enhanced: Bool, in group: DecorationGroup) {
+        let source = self.decorations[group] ?? []
+        let target = decorations.map {
+            var d = $0
+            d.locator = publication.normalizeLocator(d.locator)
+            return DiffableDecoration(decoration: d)
+        }
+        self.decorations[group] = target
+
+        guard let paginationView = paginationView else {
+            return
+        }
+
+        if decorations.isEmpty {
+            // The updates command are using `requestAnimationFrame()`, so we need it for `clear()` as well otherwise
+            // we might recreate a highlight after it has been cleared.
+            let script = enhanced
+                ? "requestAnimationFrame(function () { readium.getDecorations('\(group)').clearAllEnhanced(); });"
+                : "requestAnimationFrame(function () { readium.getDecorations('\(group)').clear(); });"
+            for (_, pageView) in paginationView.loadedViews {
+                evaluateDecorationScript(script, in: pageView as? EPUBSpreadView)
             }
-            guard let self else { return }
-            await self.initialized()
-
-            guard
-                !Task.isCancelled,
-                let paginationView = self.paginationView
-            else {
-                return
-            }
-
-            await withTaskGroup(of: Void.self) { tasks in
-                guard !Task.isCancelled else { return }
-
-                let source = self.decorations[group] ?? []
-                let target = decorations.map {
-                    var d = $0
-                    d.locator = self.publication.normalizeLocator(d.locator)
-                    return DiffableDecoration(decoration: d)
+        } else {
+            for (href, changes) in target.changesByHREF(from: source, enhanced: enhanced) {
+                guard let script = changes.javascript(forGroup: group, styles: config.decorationTemplates) else {
+                    continue
                 }
-                self.decorations[group] = target
-
-                if decorations.isEmpty {
-                    for (_, pageView) in paginationView.loadedViews {
-                        tasks.addTask {
-                            guard !Task.isCancelled else { return }
-                            await (pageView as? EPUBSpreadView)?.evaluateScript(
-                                // The updates command are using `requestAnimationFrame()`, so we need it for
-                                // `clear()` as well otherwise we might recreate a highlight after it has been
-                                // cleared.
-                                "requestAnimationFrame(function () { readium.getDecorations('\(group)').clear(); });"
-                            )
-                        }
-                    }
-                } else {
-                    for (href, changes) in target.changesByHREF(from: source) {
-                        guard let script = changes.javascript(forGroup: group, styles: self.config.decorationTemplates) else {
-                            continue
-                        }
-                        tasks.addTask { @MainActor [weak self] in
-                            guard
-                                !Task.isCancelled,
-                                let spreadView = self?.loadedSpreadViewForHREF(href),
-                                spreadView.isSpreadLoaded
-                            else {
-                                return
-                            }
-                            await spreadView.evaluateScript(script, inHREF: href)
-                        }
-                    }
-                }
+                evaluateDecorationScript(script, in: loadedSpreadViewForHREF(href), href: href)
             }
         }
-        decorationTasks[group] = task
+    }
+
+    public func addDecorations(decorations: [Decoration], enhanced: Bool, in group: DecorationGroup, completion: @escaping () -> Void) {
+        let target = decorations.map {
+            var d = $0
+            d.locator = publication.normalizeLocator(d.locator)
+            return DiffableDecoration(decoration: d)
+        }
+        // As in 2.7: stored only when the group already has decorations.
+        self.decorations[group]?.append(contentsOf: target)
+
+        for (href, changes) in target.changesByHREF(from: [], enhanced: enhanced) {
+            guard let script = changes.javascript(forGroup: group, styles: config.decorationTemplates) else {
+                continue
+            }
+            evaluateDecorationScript(script, in: loadedSpreadViewForHREF(href), href: href)
+        }
+
+        completion()
+    }
+
+    public func remove(decoration: Decoration, in group: DecorationGroup) {
+        var groupDecorations = self.decorations[group]
+        groupDecorations?.removeAll { $0.decoration.id == decoration.id }
+        self.decorations[group] = groupDecorations
+
+        let script = "requestAnimationFrame(function () { readium.getDecorations('\(group)').clearEnhanced('\(decoration.id)'); });"
+        evaluateDecorationScript(script, in: loadedSpreadViewForHREF(publication.normalizeLocator(decoration.locator).href))
+    }
+
+    public func observeDecorationRectCalculations(inGroup group: DecorationGroup, onActivated: OnRectCalculatedCallback?) {
+        guard let onActivated = onActivated else {
+            return
+        }
+        var callbacks = decorationRectsCallbacks[group] ?? []
+        callbacks.append(onActivated)
+        decorationRectsCallbacks[group] = callbacks
+
+        for (_, view) in paginationView?.loadedViews ?? [:] {
+            evaluateDecorationScript("readium.getDecorations('\(group)').setActivable();", in: view as? EPUBSpreadView)
+        }
+    }
+
+    /// Rally: decoration rect callbacks, indexed by the group name.
+    private var decorationRectsCallbacks: [DecorationGroup: [DecorableNavigator.OnRectCalculatedCallback]] = [:]
+
+    /// Rally: sends a decoration script to `spreadView` once its stored decorations are installed; before that, the
+    /// spread re-adds the stored state when it loads.
+    private func evaluateDecorationScript(_ script: String, in spreadView: EPUBSpreadView?, href: AnyURL? = nil) {
+        guard let spreadView = spreadView, spreadView.areDecorationsInstalled else {
+            return
+        }
+        Task {
+            await spreadView.evaluateScript(script, inHREF: href)
+        }
     }
 
     public func observeDecorationInteractions(inGroup group: DecorationGroup, onActivated: @escaping OnActivatedCallback) {
@@ -1072,7 +1518,12 @@ extension EPUBNavigatorViewController: EPUBSpreadViewDelegate {
             for (group, decorations) in decorations {
                 let decorations = decorations
                     .filter { $0.decoration.locator.href.isEquivalentTo(href) }
-                    .map { DecorationChange.add($0.decoration) }
+                    .map {
+                        // Rally: decorations made with the enhanced layout are re-added with it.
+                        ($0.decoration.userInfo["enhancedLayout"] as? Bool) == true
+                            ? DecorationChange.addEnhanced($0.decoration)
+                            : DecorationChange.add($0.decoration)
+                    }
 
                 guard let decorationsScript = decorations.javascript(forGroup: group, styles: config.decorationTemplates) else {
                     continue
@@ -1081,7 +1532,12 @@ extension EPUBNavigatorViewController: EPUBSpreadViewDelegate {
             }
         }
 
+        spreadView.areDecorationsInstalled = true
         await spreadView.evaluateScript("(function() {\n\(script)\n})();")
+
+        for link in links {
+            delegate?.spreadViewDidLoad(href: link.url())
+        }
     }
 
     func spreadView(_ spreadView: EPUBSpreadView, didReceive event: PointerEvent) {
@@ -1233,6 +1689,23 @@ extension EPUBNavigatorViewController: EPUBSpreadViewDelegate {
     func spreadViewDidTerminate() {
         reloadSpreads()
     }
+
+    func spreadView(_ spreadView: EPUBSpreadView, didCalculateDecorationRect id: Decoration.Id, inGroup group: DecorationGroup, frame: CGRect?, ocrLayout: Bool) {
+        guard let callbacks = decorationRectsCallbacks[group].takeIf({ !$0.isEmpty }) else {
+            return
+        }
+        for callback in callbacks {
+            callback(OnDecorationRectEvent(decorationId: id, group: group, rect: frame, ocrLayout: ocrLayout))
+        }
+    }
+
+    func spreadViewScrollViewWillBeginDragging(_ spreadView: EPUBSpreadView) {
+        delegate?.navigatorScrollViewWillBeginDragging(self)
+    }
+
+    func spreadViewScrollViewDidEndDecelerating(_ spreadView: EPUBSpreadView) {
+        delegate?.navigatorScrollViewDidEndDecelerating(self)
+    }
 }
 
 extension EPUBNavigatorViewController: EditingActionsControllerDelegate {
@@ -1272,6 +1745,14 @@ extension EPUBNavigatorViewController: PaginationViewDelegate {
         // otherwise, when open the publication, you may miss the first
         // invocation.
         updateCurrentLocation()
+    }
+
+    func paginationViewScrollViewWillBeginDragging(_ paginationView: PaginationView) {
+        delegate?.navigatorScrollViewWillBeginDragging(self)
+    }
+
+    func paginationViewScrollViewDidEndDecelerating(_ paginationView: PaginationView) {
+        delegate?.navigatorScrollViewDidEndDecelerating(self)
     }
 
     func paginationView(_ paginationView: PaginationView, positionCountAtIndex index: Int) -> Int {
