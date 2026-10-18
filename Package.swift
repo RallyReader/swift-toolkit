@@ -21,6 +21,10 @@ let package = Package(
         // Adapters to third-party dependencies.
         .library(name: "ReadiumAdapterGCDWebServer", targets: ["ReadiumAdapterGCDWebServer"]),
         .library(name: "ReadiumAdapterLCPSQLite", targets: ["ReadiumAdapterLCPSQLite"]),
+
+        // Rally: Tuist (which resolves this package for the app) fails on a target that no product reaches but
+        // test targets depend on. Not linked by the app.
+        .library(name: "TestPublications", targets: ["TestPublications"]),
     ],
     dependencies: [
         .package(url: "https://github.com/krzyzanowskim/CryptoSwift.git", from: "1.10.0"),
