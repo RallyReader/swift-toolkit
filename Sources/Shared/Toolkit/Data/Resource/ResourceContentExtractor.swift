@@ -51,15 +51,30 @@ class HTMLResourceContentExtractor: ResourceContentExtractor {
             .asString()
             .asyncFlatMap { content in
                 do {
+                    // Rally: Fuzi drops HTML entities (" ' …) when parsing the XML, so the entities are unescaped
+                    // before parsing. `&` and `"` are protected through the parsers with placeholders; line breaks
+                    // and paragraph/div boundaries become new lines; the "ff" ligature is spelled out.
+                    let unescapedContent = try Entities.unescape(content
+                        .replacingOccurrences(of: "<br />", with: "<br /\n>")
+                        .replacingOccurrences(of: "<br/>", with: "<br/>\n")
+                        .replacingOccurrences(of: "/p><p", with: "/p>\n<p")
+                        .replacingOccurrences(of: "/div><div", with: "/div>\n<div")
+                        .replacingOccurrences(of: "&amp;", with: "ampToand")
+                        .replacingOccurrences(of: "&#x0026;", with: "ampToand")
+                        .replacingOccurrences(of: "&quot;", with: "rallyquote")
+                        .replacingOccurrences(of: "\u{FB00}", with: "ff")
+                    )
+
                     // First try to parse a valid XML document, then fallback on SwiftSoup, which is slower.
-                    var text = parse(xml: content)
-                        ?? parse(html: content)
+                    let text = parse(xml: unescapedContent)
+                        ?? parse(html: unescapedContent)
                         ?? ""
 
-                    // Transform HTML entities into their actual characters.
-                    text = try Entities.unescape(text)
-
-                    return .success(text)
+                    return .success(
+                        text
+                            .replacingOccurrences(of: "ampToand", with: "&")
+                            .replacingOccurrences(of: "rallyquote", with: "\"")
+                    )
 
                 } catch {
                     return .failure(.decoding(error))
