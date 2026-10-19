@@ -895,9 +895,11 @@ open class EPUBNavigatorViewController: InputObservableViewController,
         }
     }
 
-    /// Rally: evaluates `script` in `spreadView` once it is loaded — after the Rally decoration templates rewrote the
-    /// page's text (`processSpansForTextSpacing`), as in 2.x, where the queries came after it — answering on the main
-    /// actor. A spread that does not load within 10 s answers `spreadNotLoaded` (it was dropped meanwhile).
+    /// Rally: evaluates `script` in `spreadView` once its load is over (`isSpreadReady`) — after the Rally decoration
+    /// templates rewrote the page's text (`processSpansForTextSpacing`), as in 2.x, where the queries came after it —
+    /// answering on the main actor. A spread that does not load within 10 s answers `spreadNotLoaded` (it was dropped
+    /// meanwhile). Waiting for `isSpreadLoaded` alone was not enough: it is set before the templates are registered,
+    /// and a chapter opened directly was read with its text not yet rewritten.
     private func evaluateRallyScript<H: URLConvertible>(_ script: String, in spreadView: EPUBSpreadView, href: H?, completion: @escaping (Result<Any, Error>) -> Void) {
         let href = href?.anyURL
         var answered = false
@@ -907,7 +909,7 @@ open class EPUBNavigatorViewController: InputObservableViewController,
             completion(result)
         }
         Task {
-            answer(await spreadView.evaluateScript(script, inHREF: href))
+            answer(await spreadView.evaluateScriptWhenReady(script, inHREF: href))
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
             answer(.failure(EPUBError.spreadNotLoaded))

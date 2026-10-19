@@ -68,6 +68,10 @@ class EPUBSpreadView: UIView, Loggable, PageView, PageViewMemoryReleasable {
     private var activityIndicatorStopWorkItem: DispatchWorkItem?
 
     private(set) var isSpreadLoaded = false
+    /// Rally: the load is over — the navigator registered the decoration templates, whose
+    /// `processSpansForTextSpacing` rewrites the page's text. `isSpreadLoaded` is set before that (the load's own
+    /// scripts need it), so a text query waiting only for it can read the text not yet rewritten.
+    private(set) var isSpreadReady = false
     private var spreadLoadTask: Task<Void, Never>?
 
     required init(
@@ -208,6 +212,13 @@ class EPUBSpreadView: UIView, Loggable, PageView, PageViewMemoryReleasable {
     func evaluateScript(_ script: String, inHREF href: AnyURL? = nil) async -> Result<Any, Error> {
         await spreadLoaded()
         return await evaluateRaw(script)
+    }
+
+    /// Rally: evaluates the script once the load is over (`isSpreadReady`), on the page's rewritten text.
+    /// Through `evaluateScript`, so a fixed-layout spread still runs it in the resource's frame.
+    func evaluateScriptWhenReady(_ script: String, inHREF href: AnyURL? = nil) async -> Result<Any, Error> {
+        await spreadReady()
+        return await evaluateScript(script, inHREF: href)
     }
 
     /// Rally: evaluates the script at once, without waiting for the spread to be loaded — as the 2.x navigator did. A
@@ -445,7 +456,9 @@ class EPUBSpreadView: UIView, Loggable, PageView, PageViewMemoryReleasable {
             applySettings()
             await spreadDidLoad()
             await delegate?.spreadViewDidLoad(self)
+            isSpreadReady = true
             onSpreadLoadedCallbacks.complete()
+            onSpreadReadyCallbacks.complete()
             showSpread()
         }
     }
@@ -464,6 +477,21 @@ class EPUBSpreadView: UIView, Loggable, PageView, PageViewMemoryReleasable {
         await withCheckedContinuation { continuation in
             whenSpreadLoaded {
                 continuation.resume()
+            }
+        }
+    }
+
+    private let onSpreadReadyCallbacks = CompletionList()
+
+    /// Rally: awaits the end of the load (`isSpreadReady`).
+    func spreadReady() async {
+        if isSpreadReady {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            let callback = onSpreadReadyCallbacks.add { continuation.resume() }
+            if isSpreadReady {
+                callback()
             }
         }
     }
