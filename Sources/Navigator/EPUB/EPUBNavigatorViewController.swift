@@ -895,13 +895,22 @@ open class EPUBNavigatorViewController: InputObservableViewController,
         }
     }
 
-    /// Rally: evaluates `script` in `spreadView` at once, as 2.x did (Readium 3 marks a spread loaded only after its
-    /// settings and decorations, later than its scripts are ready), answering on the main actor. A page whose
-    /// scripts are not ready answers with an error.
+    /// Rally: evaluates `script` in `spreadView` once it is loaded — after the Rally decoration templates rewrote the
+    /// page's text (`processSpansForTextSpacing`), as in 2.x, where the queries came after it — answering on the main
+    /// actor. A spread that does not load within 10 s answers `spreadNotLoaded` (it was dropped meanwhile).
     private func evaluateRallyScript<H: URLConvertible>(_ script: String, in spreadView: EPUBSpreadView, href: H?, completion: @escaping (Result<Any, Error>) -> Void) {
         let href = href?.anyURL
+        var answered = false
+        func answer(_ result: Result<Any, Error>) {
+            guard !answered else { return }
+            answered = true
+            completion(result)
+        }
         Task {
-            completion(await spreadView.evaluateScriptNow(script, inHREF: href))
+            answer(await spreadView.evaluateScript(script, inHREF: href))
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
+            answer(.failure(EPUBError.spreadNotLoaded))
         }
     }
 
