@@ -98,28 +98,40 @@ function onViewportWidthChanged() {
 /**
  * Having an odd number of columns when displaying two columns per screen causes snapping and page
  * turning issues. To fix this, we insert a blank virtual column at the end of the resource.
+ *
+ * Rally: measured from scratch on every call (the virtual columns removed first), so calling it
+ * again gives the same result. Upstream toggled the column (an odd count with the column present
+ * removed it), which assumed the column had added one; when it had not, each call flipped it and
+ * the count stayed odd. It had not when the resource's last element (a full-page image) overflows
+ * into a column of its own: the virtual column lands in that same column. A second one then makes
+ * the count even (Junie B. Jones #24, chapter 2, on a 1080 pt wide spread: 9 columns either way).
  */
-function appendVirtualColumnIfNeeded() {
+export function appendVirtualColumnIfNeeded() {
   const id = "readium-virtual-page";
-  var virtualCol = document.getElementById(id);
+  const className = "readium-virtual-column";
+  document
+    .querySelectorAll(`#${id}, .${className}`)
+    .forEach((column) => column.remove());
   if (isScrollModeEnabled() || getColumnCountPerScreen() != 2) {
-    virtualCol?.remove();
-  } else {
+    return;
+  }
+
+  function hasOddColCount() {
     var documentWidth = document.scrollingElement.scrollWidth;
     var pageWidth = window.innerWidth;
     var colCount = documentWidth / pageWidth;
-    var hasOddColCount = (Math.round(colCount * 2) / 2) % 1 > 0.1;
-    if (hasOddColCount) {
-      if (virtualCol) {
-        virtualCol.remove();
-      } else {
-        virtualCol = document.createElement("div");
-        virtualCol.setAttribute("id", id);
-        virtualCol.style.breakBefore = "column";
-        virtualCol.innerHTML = "&#8203;"; // zero-width space
-        document.body.appendChild(virtualCol);
-      }
+    return (Math.round(colCount * 2) / 2) % 1 > 0.1;
+  }
+
+  for (var i = 0; i < 2 && hasOddColCount(); i++) {
+    var virtualCol = document.createElement("div");
+    if (i == 0) {
+      virtualCol.setAttribute("id", id);
     }
+    virtualCol.classList.add(className);
+    virtualCol.style.breakBefore = "column";
+    virtualCol.innerHTML = "&#8203;"; // zero-width space
+    document.body.appendChild(virtualCol);
   }
 }
 
