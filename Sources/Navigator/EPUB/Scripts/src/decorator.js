@@ -16,6 +16,7 @@ import {
   getOCRCorrectedRect,
   getAllOCRCorrectedRects,
 } from "./utils";
+import { needsSpaceBetween } from "./text-spacing";
 
 // Polyfill for iOS 13.3
 import { ResizeObserver as ResizeObserverPolyfill } from "@juggle/resize-observer";
@@ -146,106 +147,144 @@ function processSpansForTextSpacing() {
     "$1\n<$2"
   );
 
-  // Get all spans in the document
-  const nodes = document.querySelectorAll("span");
+  insertSpacesBetweenTextFragments();
+}
 
-  // Group spans by parent element to analyze siblings
-  const nodesByParent = {};
-  for (const node of nodes) {
-    // if (node.nodeName === "div") {
-    //   if (node.style.bottom === undefined) {
-    //     node.parentElement.insertBefore(document.createTextNode("\n"), node);
-    //     continue;
-    //   }
-    // }
-    const parentKey = node.parentElement
-      ? node.parentElement.tagName +
-        "_" +
-        (node.parentElement.id || Math.random())
-      : "orphan";
-    if (!nodesByParent[parentKey]) {
-      nodesByParent[parentKey] = [];
+/**
+ * Inserts a space wherever two pieces of text touch in the DOM but are drawn
+ * apart on the page, e.g. the line fragments of a PDF-converted fixed layout.
+ * The decision lives in text-spacing.js, which is covered by tests.
+ *
+ * Everything is measured before the first insertion, so the page is laid out
+ * once instead of once per inserted space.
+ */
+function insertSpacesBetweenTextFragments() {
+  const walker = document.createTreeWalker(
+    document.body,
+    NodeFilter.SHOW_TEXT,
+    {
+      acceptNode: (node) =>
+        node.parentElement && node.parentElement.closest("script, style")
+          ? NodeFilter.FILTER_REJECT
+          : NodeFilter.FILTER_ACCEPT,
     }
-    nodesByParent[parentKey].push(node);
-    // log(`add node: ${node.textContent} to parent: ${parentKey}`);
+  );
+
+  const transforms = new Map();
+  const spacesBefore = [];
+  let previous = null;
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (node.nodeValue.length === 0) {
+      continue;
+    }
+    if (
+      previous &&
+      needsSpaceBetween(
+        {
+          text: previous.nodeValue,
+          rect: characterRect(previous, previous.nodeValue.length - 1),
+          ...drawnTransform(previous.parentElement, transforms),
+        },
+        {
+          text: node.nodeValue,
+          rect: characterRect(node, 0),
+          ...drawnTransform(node.parentElement, transforms),
+        }
+      )
+    ) {
+      spacesBefore.push({ node, previous });
+    }
+    previous = node;
   }
 
-  // First pass: Process spans and mark those that need spacing
-  for (const parentKey in nodesByParent) {
-    const siblingSpans = nodesByParent[parentKey].slice();
+  for (const { node, previous } of spacesBefore) {
+    const point = spaceInsertionPoint(node, previous);
+    // A zero-size space: it separates the words in `textContent` without
+    // moving the text that follows it inline.
+    const space = document.createElement("span");
+    space.style.fontSize = "0";
+    space.textContent = " ";
+    point.parentNode.insertBefore(space, point);
+  }
+}
 
-    // // Sort spans by their vertical position (bottom value)
-    // siblingSpans.sort((a, b) => {
-    //   const aBottom = parseFloat(a.style.bottom || "0");
-    //   const bBottom = parseFloat(b.style.bottom || "0");
-    //   return bBottom - aBottom; // Sort from top to bottom (larger bottom value is higher)
-    // });
-
-    // if (siblingSpans.length === 1) {
-    //   const span = siblingSpans[0];
-    //   if (span.nodeName === "div") {
-    //     span.parentElement.insertBefore(document.createTextNode("\n"), span);
-    //   } else {
-    //     // if (span.style.hasAttribute("word-spacing")) {
-    //     //   span.parentElement.insertBefore(document.createTextNode(" "), span);
-    //     // }
-    //   }
-    // }
-
-    // Analyze bottom distances between adjacent siblings
-    for (let i = 1; i < siblingSpans.length; i++) {
-      const currentSpan = siblingSpans[i];
-      const previousSpan = siblingSpans[i - 1];
-
-      const currentBottom = parseFloat(currentSpan.style.bottom || "0");
-      const previousBottom = parseFloat(previousSpan.style.bottom || "0");
-      const currentLeft = parseFloat(currentSpan.style.left || "0");
-      const previousLeft = parseFloat(previousSpan.style.left || "0");
-
-      // Calculate vertical distance between spans
-      const bottomDifference =
-        previousBottom < currentBottom
-          ? previousBottom / currentBottom
-          : currentBottom / previousBottom;
-
-      const leftDifference =
-        previousLeft < currentLeft
-          ? previousLeft / currentLeft
-          : currentLeft / previousLeft;
-
-      //   log(
-      //     `previous span: ${previousSpan.textContent} | current span: ${currentSpan.textContent} | bottom difference: ${bottomDifference} | left difference: ${leftDifference}`
-      //   );
-
-      // If there's a significant vertical gap, mark for spacing
-      if (
-        bottomDifference < 0.87 ||
-        leftDifference > 0.99 ||
-        leftDifference < 0.1
-      ) {
-        // log(`adding spacing before: ${currentSpan.textContent}`);
-        currentSpan.setAttribute("data-needs-spacing", "true");
-      }
+/**
+ * Returns the box of the character at `index` in the text `node`, or null when
+ * it is not rendered.
+ */
+function characterRect(node, index) {
+  const range = document.createRange();
+  range.setStart(node, index);
+  range.setEnd(node, index + 1);
+  for (const rect of range.getClientRects()) {
+    if (rect.width > 0 || rect.height > 0) {
+      return {
+        top: rect.top,
+        bottom: rect.bottom,
+        left: rect.left,
+        right: rect.right,
+      };
     }
   }
+  return null;
+}
 
-  // Second pass: Insert spaces where needed, but before the span elements instead of inside them
-  for (const span of document.querySelectorAll(
-    'span[data-needs-spacing="true"]'
-  )) {
-    // Insert a space before the span element (not inside it)
-    if (span.parentElement) {
-      span.parentElement.insertBefore(document.createTextNode(" "), span);
-      // log(`inserted space before span: ${span.textContent}`);
-    } else {
-      //   logErrorMessage(
-      //     `Failed to insert space before span: ${span.textContent}`
-      //   );
-    }
-
-    // Remove the marker attribute
-    span.removeAttribute("data-needs-spacing");
+/**
+ * Returns how the text of `element` is drawn: { angle, fontSize }, the angle in
+ * radians and the font size once the CSS transforms of its ancestors are
+ * applied. `cache` maps elements to the transform they apply to their
+ * children ({ angle, scale }).
+ */
+function drawnTransform(element, cache) {
+  if (!element) {
+    return { angle: 0, fontSize: 0 };
   }
+  const { angle, scale } = transformOf(element, cache);
+  return {
+    angle,
+    fontSize: parseFloat(getComputedStyle(element).fontSize) * scale,
+  };
+}
+
+function transformOf(element, cache) {
+  if (!element) {
+    return { angle: 0, scale: 1 };
+  }
+  if (cache.has(element)) {
+    return cache.get(element);
+  }
+  let { angle, scale } = transformOf(element.parentElement, cache);
+  const matrix = /^matrix\(([^,]+),([^,]+),/.exec(
+    getComputedStyle(element).transform
+  );
+  if (matrix) {
+    const a = parseFloat(matrix[1]);
+    const b = parseFloat(matrix[2]);
+    angle += Math.atan2(b, a);
+    scale *= Math.hypot(a, b);
+  }
+  const transform = { angle, scale };
+  cache.set(element, transform);
+  return transform;
+}
+
+/**
+ * Returns the node to insert a space before so that it lands between
+ * `previous` and `node`: the outermost element that starts with `node` and
+ * does not contain `previous`, keeping the space out of the next word's
+ * element.
+ */
+function spaceInsertionPoint(node, previous) {
+  let point = node;
+  while (
+    !point.previousSibling &&
+    point.parentNode &&
+    point.parentNode !== document.body &&
+    !point.parentNode.contains(previous)
+  ) {
+    point = point.parentNode;
+  }
+  return point;
 }
 
 /**
