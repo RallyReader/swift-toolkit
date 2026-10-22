@@ -16,6 +16,13 @@ import {
   getOCRCorrectedRect,
   getAllOCRCorrectedRects,
 } from "./utils";
+import {
+  continuesOnTheSameLine,
+  isAtTopOrBottom,
+  isDOMIsolated,
+  isPageNumber,
+  pageNumberIsolation,
+} from "./page-number";
 
 // Polyfill for iOS 13.3
 import { ResizeObserver as ResizeObserverPolyfill } from "@juggle/resize-observer";
@@ -116,9 +123,10 @@ function processSpansForTextSpacing() {
     "&ndash;": "–", // en dash
     "&mdash;": "—", // em dash
     "&nbsp;": " ", // non-breaking space
-    "&amp;": "&", // ampersand
-    "&lt;": "<", // less than
-    "&gt;": ">", // greater than
+    // Not &amp;, &lt; nor &gt;: innerHTML escapes the &, < and > of the text
+    // with them, and the text already holds the characters. Writing them back
+    // unescaped breaks the markup, and XHTML pages throw (SyntaxError), which
+    // stopped the whole text preparation below.
   };
 
   // Handle HTML entities - decode them properly
@@ -685,10 +693,30 @@ export function DecorationGroup(groupId, groupName) {
     return cachedTextContentBounds;
   }
 
-  function isPageNumber(text) {
-    const trimmedText = text.trim();
-    // Only return true for strings that consist entirely of digits
-    return /^\d+$/.test(trimmedText);
+  // Rect of the first non-space character after `range`, or null.
+  function rectOfNextCharacter(range) {
+    let node = range.endContainer;
+    if (node.nodeType !== Node.TEXT_NODE) {
+      return null;
+    }
+    const walker = document.createTreeWalker(
+      document.body,
+      NodeFilter.SHOW_TEXT
+    );
+    walker.currentNode = node;
+    let offset = range.endOffset;
+    while (node) {
+      const index = node.data.slice(offset).search(/\S/);
+      if (index !== -1) {
+        const characterRange = document.createRange();
+        characterRange.setStart(node, offset + index);
+        characterRange.setEnd(node, offset + index + 1);
+        return characterRange.getBoundingClientRect();
+      }
+      node = walker.nextNode();
+      offset = 0;
+    }
+    return null;
   }
 
   function layoutEnhanced(item, postMessage, isRelayout = false) {
@@ -748,7 +776,8 @@ export function DecorationGroup(groupId, groupName) {
       return;
     }
 
-    // Start timing the isolated page number check
+    // Skip page numbers: they must not be highlighted nor read aloud. The
+    // decision itself lives in page-number.js, which is covered by tests.
     const startTime = performance.now();
 
     const text = item.decoration.locator.text.highlight;
@@ -757,158 +786,56 @@ export function DecorationGroup(groupId, groupName) {
 
       // Check position relative to the actual text content area, not the
       // viewport — handles pages where text is in a smaller centered section.
-      // Use a tight threshold when we measured real text bounds (OCR/fixed),
-      // and a more generous one when falling back to the viewport (regular books).
-      const textBounds = getTextContentBounds();
-      const textHeight = textBounds.maxY - textBounds.minY;
-      const relativeTop = boundingRect.top - textBounds.minY;
-      const posThreshold = textBounds.measured ? 0.05 : 0.15;
-      const isAtTopOrBottom =
-        textHeight > 0
-          ? relativeTop < textHeight * posThreshold ||
-            relativeTop > textHeight * (1 - posThreshold)
-          : false;
-
-      if (isAtTopOrBottom) {
+      if (isAtTopOrBottom(boundingRect.top, getTextContentBounds())) {
         log(`PAGE NUMBER :: is at top or bottom: ${text}`);
 
         const before = item.decoration.locator.text.before || "";
         const after = item.decoration.locator.text.after || "";
 
-        // IMPROVEMENT 2: Check for punctuation + whitespace pattern before page number
-        // This catches cases like "whole sleepover." followed by the page number
-        const beforeEndsWithPunctuationAndWhitespace = /[.!?;:]\s*$/.test(
-          before
-        );
-
-        // IMPROVEMENT 3: Check for multiple newlines or significant whitespace
-        const beforeHasMultipleNewlines = /\n\s*\n/.test(before);
-        const beforeEndsWithSignificantWhitespace = /\s{2,}$/.test(before);
-
-        // NEW IMPROVEMENT: Check what comes immediately before the number (after the last newline)
-        // If it's a word like "Chapter", "Section", "Part", etc., it's not a page number
-        const lastNewlineIndex = before.lastIndexOf("\n");
-        const immediateTextBefore =
-          lastNewlineIndex !== -1
-            ? before.substring(lastNewlineIndex + 1)
-            : before;
-        const beforeEndsWithWordAndSpace = /[a-zA-Z]\s+$/.test(
-          immediateTextBefore
-        );
-
-        // Check if the preceding text connects to this number via a
-        // digit + connecting character (e.g., "8:" → "30" = time "8:30").
-        // We collapse all whitespace to handle OCR layouts where each word
-        // is in its own element separated by newlines.
-        const beforeContentCollapsed = before.replace(/\s+/g, " ").trim();
-        const beforeConnectsToNumber = /\d[:-]$/.test(beforeContentCollapsed);
-
-        // Check if 'before' ends in newline, is empty, or has no alphanumeric characters
-        const beforeIsEmpty = before.length === 0;
-        const beforeEndsInNewline = before.endsWith("\n");
-        const beforeHasNoAlphanumeric = !/[a-zA-Z0-9]/.test(before);
-
-        // Check if 'after' begins with newline, is empty, or has no alphanumeric characters
-        const afterIsEmpty = after.length === 0;
-        const afterBeginsWithNewline = after.startsWith("\n");
-        const afterHasNoAlphanumeric = !/[a-zA-Z0-9]/.test(after);
-        // IMPROVEMENT 6: Check if 'after' begins with significant whitespace (space added by processSpansForTextSpacing)
-        const afterBeginsWithWhitespace = /^\s/.test(after);
-
-        // IMPROVEMENT 4: DOM structure check - is the page number in its own isolated element?
-        let isDOMIsolated = false;
+        let domIsolated = false;
         try {
           let startNode = item.range.startContainer;
           if (startNode.nodeType === Node.TEXT_NODE) {
             startNode = startNode.parentElement;
           }
-
-          // Check if this element only contains the page number (no other significant content)
-          const parentText = startNode.textContent.trim();
-          const isOnlyPageNumber = parentText === text.trim();
-
-          // Check if parent has very little content (just the page number)
-          const parentHasMinimalContent = parentText.length <= 5;
-
-          // In OCR-style layouts (text-overlay divs inside ocr-container),
-          // every word is in its own element, so DOM isolation is not meaningful.
-          const isInOCRLayout =
-            !!startNode.closest(".ocr-container") ||
-            startNode.classList.contains("text-overlay");
-
-          isDOMIsolated =
-            !isInOCRLayout && (isOnlyPageNumber || parentHasMinimalContent);
-
-          log(
-            `PAGE NUMBER :: DOM isolation check - parentText: "${parentText}", isOnlyPageNumber: ${isOnlyPageNumber}, isInOCRLayout: ${isInOCRLayout}, isDOMIsolated: ${isDOMIsolated}`
-          );
+          domIsolated = isDOMIsolated({
+            text,
+            parentText: startNode.textContent,
+            isInOCRLayout:
+              !!startNode.closest(".ocr-container") ||
+              startNode.classList.contains("text-overlay"),
+          });
         } catch (error) {
           log(`PAGE NUMBER :: DOM isolation check failed: ${error.message}`);
         }
 
-        // Original isolation check (keeping existing behavior)
-        const isIsolatedPageNumber =
-          (beforeIsEmpty || beforeEndsInNewline || beforeHasNoAlphanumeric) &&
-          (afterIsEmpty ||
-            afterBeginsWithNewline ||
-            afterHasNoAlphanumeric ||
-            afterBeginsWithWhitespace);
+        let followedOnSameLine = false;
+        try {
+          followedOnSameLine = continuesOnTheSameLine(
+            boundingRect,
+            rectOfNextCharacter(item.range)
+          );
+        } catch (error) {
+          log(`PAGE NUMBER :: next character check failed: ${error.message}`);
+        }
 
-        // IMPROVEMENT 5: Enhanced isolation check with additional patterns
-        // CRITICAL: Exclude numbers that immediately follow words (like "Chapter 1")
-        const isIsolatedWithEnhancements =
-          !beforeEndsWithWordAndSpace && // Exclude if preceded by word like "Chapter "
-          !beforeConnectsToNumber && // Exclude if part of compound like "8:30"
-          (isIsolatedPageNumber || // Keep original logic
-            (isDOMIsolated &&
-              (afterIsEmpty ||
-                afterBeginsWithNewline ||
-                afterHasNoAlphanumeric ||
-                afterBeginsWithWhitespace)) || // DOM + after check
-            (beforeEndsWithPunctuationAndWhitespace &&
-              isDOMIsolated &&
-              afterIsEmpty) || // Punctuation + DOM + end of content
-            (beforeHasMultipleNewlines &&
-              (afterIsEmpty ||
-                afterBeginsWithNewline ||
-                afterBeginsWithWhitespace)) || // Multiple newlines before
-            (beforeEndsWithSignificantWhitespace &&
-              isDOMIsolated &&
-              afterIsEmpty)); // Significant whitespace + DOM + end of content
+        const { isolated, checks } = pageNumberIsolation({
+          before,
+          after,
+          domIsolated,
+          followedOnSameLine,
+        });
 
-        // Calculate elapsed time
-        const endTime = performance.now();
-        const elapsedTime = endTime - startTime;
         log(
-          `PAGE NUMBER :: isolation check took ${elapsedTime.toFixed(
-            3
-          )} ms for: ${text}`
+          `PAGE NUMBER :: isolation check took ${(
+            performance.now() - startTime
+          ).toFixed(3)} ms for: ${text}`
         );
-
         log(`PAGE NUMBER :: before: "${before}"`);
-        log(
-          `PAGE NUMBER :: before is empty: ${beforeIsEmpty} | before ends in newline: ${beforeEndsInNewline} | before has no alphanumeric: ${beforeHasNoAlphanumeric}`
-        );
-        log(
-          `PAGE NUMBER :: before ends with punctuation+whitespace: ${beforeEndsWithPunctuationAndWhitespace} | has multiple newlines: ${beforeHasMultipleNewlines} | ends with significant whitespace: ${beforeEndsWithSignificantWhitespace}`
-        );
-        log(
-          `PAGE NUMBER :: immediate text before: "${immediateTextBefore}" | ends with word+space: ${beforeEndsWithWordAndSpace}`
-        );
-        log(
-          `PAGE NUMBER :: collapsed before: "${beforeContentCollapsed}" | connects to number: ${beforeConnectsToNumber}`
-        );
-
         log(`PAGE NUMBER :: after: "${after}"`);
-        log(
-          `PAGE NUMBER :: after is empty: ${afterIsEmpty} | after begins with newline: ${afterBeginsWithNewline} | after has no alphanumeric: ${afterHasNoAlphanumeric} | after begins with whitespace: ${afterBeginsWithWhitespace}`
-        );
+        log(`PAGE NUMBER :: checks: ${JSON.stringify(checks)}`);
 
-        log(
-          `PAGE NUMBER :: original isolated: ${isIsolatedPageNumber} | with enhancements: ${isIsolatedWithEnhancements}`
-        );
-
-        if (isIsolatedWithEnhancements) {
+        if (isolated) {
           log(`PAGE NUMBER :: is isolated: ${text}`);
           postMessageWithInvalidRect();
           return;

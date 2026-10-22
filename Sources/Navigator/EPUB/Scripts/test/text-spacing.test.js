@@ -17,8 +17,10 @@ function registerTemplates(body) {
 }
 
 describe("HTML entities", () => {
-  test("&amp; is decoded before the body is re-parsed (today: this makes the XHTML invalid, so registering throws)", () => {
-    expect(() => registerTemplates("<p>Tom &amp; Jerry</p>")).toThrow();
+  test("&amp;, &lt; and &gt; stay escaped in the markup, so the text preparation still runs (RR-9067)", () => {
+    expect(registerTemplates("<p>Tom &amp; Jerry &lt;3 &gt;</p><p>two</p>")).toBe(
+      "Tom & Jerry <3 >\ntwo"
+    );
   });
 
   test("a non-breaking space stays a U+00A0 character (the &nbsp; mapping never matches XML serialization)", () => {
