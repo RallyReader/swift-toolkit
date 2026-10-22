@@ -232,19 +232,25 @@ describe("isAtTopOrBottom", () => {
 
 describe("isDOMIsolated", () => {
   test("element with only the number", () => {
-    expect(isDOMIsolated({ text: "12", parentText: " 12 ", isInOCRLayout: false })).toBe(true);
+    expect(
+      isDOMIsolated({ text: "12", parentText: " 12 ", isInOCRLayout: false })
+    ).toBe(true);
   });
 
   test("element with a sentence", () => {
-    expect(isDOMIsolated({
+    expect(
+      isDOMIsolated({
         text: "12",
         parentText: "I am 12 years old.",
         isInOCRLayout: false,
-      })).toBe(false);
+      })
+    ).toBe(false);
   });
 
   test("never in OCR layouts", () => {
-    expect(isDOMIsolated({ text: "12", parentText: "12", isInOCRLayout: true })).toBe(false);
+    expect(
+      isDOMIsolated({ text: "12", parentText: "12", isInOCRLayout: true })
+    ).toBe(false);
   });
 });
 

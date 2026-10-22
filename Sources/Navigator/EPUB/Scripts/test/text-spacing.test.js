@@ -18,9 +18,9 @@ function registerTemplates(body) {
 
 describe("HTML entities", () => {
   test("&amp;, &lt; and &gt; stay escaped in the markup, so the text preparation still runs (RR-9067)", () => {
-    expect(registerTemplates("<p>Tom &amp; Jerry &lt;3 &gt;</p><p>two</p>")).toBe(
-      "Tom & Jerry <3 >\ntwo"
-    );
+    expect(
+      registerTemplates("<p>Tom &amp; Jerry &lt;3 &gt;</p><p>two</p>")
+    ).toBe("Tom & Jerry <3 >\ntwo");
   });
 
   test("a non-breaking space stays a U+00A0 character (the &nbsp; mapping never matches XML serialization)", () => {
@@ -72,75 +72,81 @@ describe("line breaks", () => {
   });
 });
 
-describe("OCR span spacing", () => {
-  // OCR books position every word in its own span; spaces are inserted from the spans' geometry.
-  function ocr(parentAttributes, spans) {
-    const html = spans
-      .map(
-        ([text, bottom, left]) =>
-          `<span style="bottom: ${bottom}px; left: ${left}px">${text}</span>`
-      )
-      .join("");
-    return registerTemplates(`<div ${parentAttributes}>${html}</div>`);
-  }
-
-  test("words on one line, far apart horizontally, are not separated", () => {
-    expect(
-      ocr('id="page"', [
-        ["The", 100, 10],
-        ["cat", 100, 50],
-      ])
-    ).toBe("Thecat");
+describe("fragment spacing (RR-6094)", () => {
+  // PDF conversions draw every text fragment as its own positioned element. A zero-size space is
+  // inserted where two DOM-adjacent fragments are drawn apart; the decision itself is covered with
+  // measured values in text-geometry-spacing.test.js. jsdom has no layout, so each element's text is
+  // drawn at its `data-box` ("top bottom left right").
+  let getClientRects;
+  beforeEach(() => {
+    getClientRects = Range.prototype.getClientRects;
+    Range.prototype.getClientRects = function () {
+      const box = this.startContainer.parentElement?.dataset.box;
+      if (!box) {
+        return [];
+      }
+      const [top, bottom, left, right] = box.split(" ").map(Number);
+      return [
+        { top, bottom, left, right, width: right - left, height: bottom - top },
+      ];
+    };
+  });
+  afterEach(() => {
+    Range.prototype.getClientRects = getClientRects;
   });
 
-  test("a word on a lower line gets a space before it", () => {
+  const fragment = (text, box) => `<span data-box="${box}">${text}</span>`;
+
+  test("fragments of one word, kerned on one line, stay together", () => {
     expect(
-      ocr('id="page"', [
-        ["end", 100, 300],
-        ["start", 80, 10],
-      ])
+      registerTemplates(
+        `<div>${fragment("A", "0 20 0 10")}${fragment(
+          "rt",
+          "0 20 11 25"
+        )}</div>`
+      )
+    ).toBe("Art");
+  });
+
+  test("a fragment after a word-size gap on the same line starts a new word", () => {
+    expect(
+      registerTemplates(
+        `<div>${fragment("Art", "0 20 0 25")}${fragment(
+          "is",
+          "0 20 33 45"
+        )}</div>`
+      )
+    ).toBe("Art is");
+  });
+
+  test("a fragment on the next line starts a new word", () => {
+    expect(
+      registerTemplates(
+        `<div>${fragment("end", "0 20 300 330")}${fragment(
+          "start",
+          "30 50 0 40"
+        )}</div>`
+      )
     ).toBe("end start");
   });
 
-  test("a word at almost the same left position gets a space before it", () => {
-    expect(
-      ocr('id="page"', [
-        ["one", 100, 100],
-        ["two", 100, 100.5],
-      ])
-    ).toBe("one two");
+  test("the space is a zero-size element outside the next word's element", () => {
+    registerTemplates(
+      `<div><span>${fragment("end", "0 20 300 330")}</span><span>${fragment(
+        "start",
+        "30 50 0 40"
+      )}</span></div>`
+    );
+    const space = document.querySelector("div").children[1];
+    expect(space.textContent).toBe(" ");
+    expect(space.style.fontSize).toBe("0px");
+    expect(space.nextElementSibling.textContent).toBe("start");
   });
 
-  test("a word much further right than the previous one gets a space before it", () => {
-    expect(
-      ocr('id="page"', [
-        ["one", 100, 1],
-        ["two", 100, 20],
-      ])
-    ).toBe("one two");
-  });
-
-  test("today: spans whose parent has no id are never compared, so they get no space", () => {
-    expect(
-      ocr('class="page"', [
-        ["end", 100, 300],
-        ["start", 80, 10],
-      ])
-    ).toBe("endstart");
-  });
-
-  test("spans without position styles get no space", () => {
+  test("text that is not drawn gets no space", () => {
     expect(
       registerTemplates('<p id="p"><span>one</span><span>two</span></p>')
     ).toBe("onetwo");
-  });
-
-  test("the spacing marker attribute is removed", () => {
-    ocr('id="page"', [
-      ["end", 100, 300],
-      ["start", 80, 10],
-    ]);
-    expect(document.querySelector("[data-needs-spacing]")).toBeNull();
   });
 });
 

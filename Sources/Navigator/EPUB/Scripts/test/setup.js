@@ -20,6 +20,11 @@ if (!("scrollingElement" in document)) {
   });
 }
 
+// jsdom has no layout: a range draws no boxes. Tests that need geometry replace this per test.
+if (!Range.prototype.getClientRects) {
+  Range.prototype.getClientRects = () => [];
+}
+
 beforeEach(() => {
   const handlers = {};
   global.webkit = {

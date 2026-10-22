@@ -6,7 +6,7 @@
 
 // Decides whether a word decoration is a printed page number, which read
 // aloud skips. Kept free of DOM access so the scenarios can be tested in Node
-// (test/page-number.test.mjs): `decorator.js` measures the page and passes
+// (test/page-number.test.js): `decorator.js` measures the page and passes
 // plain values in.
 
 /**
