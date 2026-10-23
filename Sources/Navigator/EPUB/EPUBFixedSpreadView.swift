@@ -18,6 +18,15 @@ final class EPUBFixedSpreadView: EPUBSpreadView {
 
     private static let fixedScript = loadScript(named: "readium-fixed")
 
+    /// Rally (RR-6330): turns off WebKit's text autosizing in every frame. A fixed-layout page is scaled down to fit
+    /// (0.56 on an iPad mini in portrait), and in the mobile content mode a WKWebView gets on a portrait iPad WebKit
+    /// then enlarges its small text (14.8 px drawn at 18 px), pushing lines past the page's edge. `100%`, which
+    /// Readium CSS sets for reflowable resources, still enlarges it here; only `none` keeps the book's sizes. Inline
+    /// on the root element, so a book's stylesheet cannot turn it back on.
+    private static let textSizeAdjustScript = """
+    document.documentElement.style.setProperty('-webkit-text-size-adjust', 'none');
+    """
+
     required init(
         viewModel: EPUBNavigatorViewModel,
         spread: EPUBSpread,
@@ -26,6 +35,7 @@ final class EPUBFixedSpreadView: EPUBSpreadView {
     ) {
         var scripts = scripts
         scripts.append(WKUserScript(source: Self.fixedScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+        scripts.append(WKUserScript(source: Self.textSizeAdjustScript, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
 
         super.init(viewModel: viewModel, spread: spread, scripts: scripts, animatedLoad: animatedLoad)
     }
