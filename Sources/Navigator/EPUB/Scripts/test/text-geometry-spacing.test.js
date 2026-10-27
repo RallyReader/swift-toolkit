@@ -76,6 +76,11 @@ const separate = [
     next: piece("long", [436.6, 451.4, 821, 830], 0, 14.8),
   },
   {
+    name: "a quote alone is not a drop cap (synthetic: '\"' 'long')",
+    previous: piece('"', [431.2, 542.2, 746, 810.5], 0, 111),
+    next: piece("long", [436.6, 451.4, 816, 820], 0, 14.8),
+  },
+  {
     name: "rotated caption next to regular text",
     previous: piece("caption", [100, 128, 100, 110], VERTICAL, 28),
     next: piece("Text", [100, 128, 112, 125], 0, 28),
@@ -92,6 +97,16 @@ const joined = [
     name: "floated drop cap with a right margin (9780374392840 p.3: 'B' 'onjour!')",
     previous: piece("B", [431.2, 542.2, 746, 810.5], 0, 111),
     next: piece("onjour!", [436.6, 451.4, 816, 820], 0, 14.8),
+  },
+  {
+    name: "floated drop cap after its opening quote (synthetic, Treasure Island ch.5: '\"N' 'o, not I')",
+    previous: piece('"N', [431.2, 542.2, 746, 810.5], 0, 111),
+    next: piece("o, not I", [436.6, 451.4, 816, 820], 0, 14.8),
+  },
+  {
+    name: "floated drop cap after a curly quote (synthetic: '“N' 'o')",
+    previous: piece("“N", [431.2, 542.2, 746, 810.5], 0, 111),
+    next: piece("o", [436.6, 451.4, 816, 820], 0, 14.8),
   },
   {
     name: "word split by a kerning span (p.4: 'Intro' 'duction')",
