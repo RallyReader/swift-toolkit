@@ -169,17 +169,62 @@ final class EditingActionsController {
         }
     }
 
+    /// Whether this is the iOS app running on a Mac.
+    private static var isiOSAppOnMac: Bool {
+        ProcessInfo.processInfo.isiOSAppOnMac
+    }
+
+    /// Whether `selector` belongs to one of the configured actions, and the
+    /// user has the rights to use it. Unlike `canPerformAction(_:)`, it doesn't
+    /// depend on the selection, which may not have arrived from the web view
+    /// yet when the system builds the menu.
+    private func isConfigured(_ selector: Selector) -> Bool {
+        actions.first { $0.actions.contains(selector) }.map(isActionAllowed) ?? false
+    }
+
+    /// The system commands among `elements` that are configured, with the
+    /// submenus left empty dropped.
+    private func configuredElements(_ elements: [UIMenuElement]) -> [UIMenuElement] {
+        elements.compactMap { element in
+            if let command = element as? UICommand {
+                return isConfigured(command.action) ? command : nil
+            } else if let menu = element as? UIMenu {
+                let children = configuredElements(menu.children)
+                return children.isEmpty ? nil : menu.replacingChildren(children)
+            } else {
+                return nil
+            }
+        }
+    }
+
     @available(iOS 13.0, *)
     func buildMenu(with builder: UIMenuBuilder) {
-        // Rally: remove all system menus so only the custom editing actions remain.
-        builder.remove(menu: .lookup)
+        // Rally: remove the system menus so only the custom editing actions
+        // remain, except on iOS (RR-9388):
+        //  - Speak (Accessibility > Spoken Content > Speak Selection), for
+        //    students who need to hear a passage, read it, and hear it again;
+        //  - the configured actions of the Look Up group, such as Translate,
+        //    for multilingual classrooms. Its other items (Look Up, Find
+        //    Selection) go unless they are configured.
+        // On Mac, AppKit shows the actions it can't perform greyed out instead
+        // of hiding them, so every system menu goes.
+        if Self.isiOSAppOnMac {
+            builder.remove(menu: .lookup)
+            builder.remove(menu: .speech)
+        } else if let lookup = builder.menu(for: .lookup) {
+            let children = configuredElements(lookup.children)
+            if children.isEmpty {
+                builder.remove(menu: .lookup)
+            } else {
+                builder.replaceChildren(ofMenu: .lookup) { _ in children }
+            }
+        }
         builder.remove(menu: .share)
         builder.remove(menu: .learn)
         builder.remove(menu: .standardEdit)
         builder.remove(menu: .undoRedo)
         builder.remove(menu: .find)
         builder.remove(menu: .replace)
-        builder.remove(menu: .speech)
         builder.remove(menu: .spelling)
         builder.remove(menu: .substitutions)
         builder.remove(menu: .transformations)
