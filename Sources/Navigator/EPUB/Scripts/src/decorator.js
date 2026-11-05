@@ -23,6 +23,7 @@ import {
   isPageNumber,
   pageNumberIsolation,
 } from "./page-number";
+import { keepsNewlines } from "./line-breaks";
 import { needsSpaceBetween } from "./text-spacing";
 
 // Polyfill for iOS 13.3
@@ -160,16 +161,41 @@ function processSpansForTextSpacing() {
   );
 
   // Continue with the rest of the function
-  document.body.innerHTML = document.body.innerHTML.replace(
-    /<br\s*\/>/g,
-    "$&\n"
-  );
+  // Before the <div>/<p> rewrite: it adds no second newline after the one a
+  // <br> got, and its re-parse merges that newline into the next line's text
+  // node, as the innerHTML rewrite this pass replaces left them.
+  separateLineBreaks();
   document.body.innerHTML = document.body.innerHTML.replace(
     /([^\n])<(div|p)/g,
     "$1\n<$2"
   );
 
   insertSpacesBetweenTextFragments();
+}
+
+/**
+ * Gives every <br> exactly one "\n" in `textContent`, so the words on either
+ * side of it stay apart, without changing what the page draws. The decision
+ * lives in line-breaks.js, which is covered by tests.
+ *
+ * It walks the DOM instead of rewriting `innerHTML`, so it also covers the
+ * <br> with attributes, which serialize as `<br class="…" />`, and HTML
+ * pages' `<br>`. Every style is read before the first change, so the page is
+ * laid out once.
+ */
+function separateLineBreaks() {
+  const lineBreaks = Array.from(document.body.getElementsByTagName("br"));
+  const replaced = lineBreaks.map((lineBreak) =>
+    keepsNewlines(getComputedStyle(lineBreak))
+  );
+  lineBreaks.forEach((lineBreak, index) => {
+    const newline = document.createTextNode("\n");
+    if (replaced[index]) {
+      lineBreak.replaceWith(newline);
+    } else {
+      lineBreak.after(newline);
+    }
+  });
 }
 
 /**
