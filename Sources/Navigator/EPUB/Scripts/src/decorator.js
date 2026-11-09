@@ -16,6 +16,14 @@ import {
   getOCRCorrectedRect,
   getAllOCRCorrectedRects,
 } from "./utils";
+import {
+  continuesOnTheSameLine,
+  isAtTopOrBottom,
+  isDOMIsolated,
+  isPageNumber,
+  pageNumberIsolation,
+} from "./page-number";
+import { needsSpaceBetween } from "./text-spacing";
 
 // Polyfill for iOS 13.3
 import { ResizeObserver as ResizeObserverPolyfill } from "@juggle/resize-observer";
@@ -102,9 +110,10 @@ function processSpansForTextSpacing() {
     "&ndash;": "–", // en dash
     "&mdash;": "—", // em dash
     "&nbsp;": " ", // non-breaking space
-    "&amp;": "&", // ampersand
-    "&lt;": "<", // less than
-    "&gt;": ">", // greater than
+    // Not &amp;, &lt; nor &gt;: innerHTML escapes the &, < and > of the text
+    // with them, and the text already holds the characters. Writing them back
+    // unescaped breaks the markup, and XHTML pages throw (SyntaxError), which
+    // stopped the whole text preparation below.
   };
 
   // Handle HTML entities - decode them properly
@@ -146,106 +155,144 @@ function processSpansForTextSpacing() {
     "$1\n<$2"
   );
 
-  // Get all spans in the document
-  const nodes = document.querySelectorAll("span");
+  insertSpacesBetweenTextFragments();
+}
 
-  // Group spans by parent element to analyze siblings
-  const nodesByParent = {};
-  for (const node of nodes) {
-    // if (node.nodeName === "div") {
-    //   if (node.style.bottom === undefined) {
-    //     node.parentElement.insertBefore(document.createTextNode("\n"), node);
-    //     continue;
-    //   }
-    // }
-    const parentKey = node.parentElement
-      ? node.parentElement.tagName +
-        "_" +
-        (node.parentElement.id || Math.random())
-      : "orphan";
-    if (!nodesByParent[parentKey]) {
-      nodesByParent[parentKey] = [];
+/**
+ * Inserts a space wherever two pieces of text touch in the DOM but are drawn
+ * apart on the page, e.g. the line fragments of a PDF-converted fixed layout.
+ * The decision lives in text-spacing.js, which is covered by tests.
+ *
+ * Everything is measured before the first insertion, so the page is laid out
+ * once instead of once per inserted space.
+ */
+function insertSpacesBetweenTextFragments() {
+  const walker = document.createTreeWalker(
+    document.body,
+    NodeFilter.SHOW_TEXT,
+    {
+      acceptNode: (node) =>
+        node.parentElement && node.parentElement.closest("script, style")
+          ? NodeFilter.FILTER_REJECT
+          : NodeFilter.FILTER_ACCEPT,
     }
-    nodesByParent[parentKey].push(node);
-    // log(`add node: ${node.textContent} to parent: ${parentKey}`);
+  );
+
+  const transforms = new Map();
+  const spacesBefore = [];
+  let previous = null;
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (node.nodeValue.length === 0) {
+      continue;
+    }
+    if (
+      previous &&
+      needsSpaceBetween(
+        {
+          text: previous.nodeValue,
+          rect: characterRect(previous, previous.nodeValue.length - 1),
+          ...drawnTransform(previous.parentElement, transforms),
+        },
+        {
+          text: node.nodeValue,
+          rect: characterRect(node, 0),
+          ...drawnTransform(node.parentElement, transforms),
+        }
+      )
+    ) {
+      spacesBefore.push({ node, previous });
+    }
+    previous = node;
   }
 
-  // First pass: Process spans and mark those that need spacing
-  for (const parentKey in nodesByParent) {
-    const siblingSpans = nodesByParent[parentKey].slice();
+  for (const { node, previous } of spacesBefore) {
+    const point = spaceInsertionPoint(node, previous);
+    // A zero-size space: it separates the words in `textContent` without
+    // moving the text that follows it inline.
+    const space = document.createElement("span");
+    space.style.fontSize = "0";
+    space.textContent = " ";
+    point.parentNode.insertBefore(space, point);
+  }
+}
 
-    // // Sort spans by their vertical position (bottom value)
-    // siblingSpans.sort((a, b) => {
-    //   const aBottom = parseFloat(a.style.bottom || "0");
-    //   const bBottom = parseFloat(b.style.bottom || "0");
-    //   return bBottom - aBottom; // Sort from top to bottom (larger bottom value is higher)
-    // });
-
-    // if (siblingSpans.length === 1) {
-    //   const span = siblingSpans[0];
-    //   if (span.nodeName === "div") {
-    //     span.parentElement.insertBefore(document.createTextNode("\n"), span);
-    //   } else {
-    //     // if (span.style.hasAttribute("word-spacing")) {
-    //     //   span.parentElement.insertBefore(document.createTextNode(" "), span);
-    //     // }
-    //   }
-    // }
-
-    // Analyze bottom distances between adjacent siblings
-    for (let i = 1; i < siblingSpans.length; i++) {
-      const currentSpan = siblingSpans[i];
-      const previousSpan = siblingSpans[i - 1];
-
-      const currentBottom = parseFloat(currentSpan.style.bottom || "0");
-      const previousBottom = parseFloat(previousSpan.style.bottom || "0");
-      const currentLeft = parseFloat(currentSpan.style.left || "0");
-      const previousLeft = parseFloat(previousSpan.style.left || "0");
-
-      // Calculate vertical distance between spans
-      const bottomDifference =
-        previousBottom < currentBottom
-          ? previousBottom / currentBottom
-          : currentBottom / previousBottom;
-
-      const leftDifference =
-        previousLeft < currentLeft
-          ? previousLeft / currentLeft
-          : currentLeft / previousLeft;
-
-      //   log(
-      //     `previous span: ${previousSpan.textContent} | current span: ${currentSpan.textContent} | bottom difference: ${bottomDifference} | left difference: ${leftDifference}`
-      //   );
-
-      // If there's a significant vertical gap, mark for spacing
-      if (
-        bottomDifference < 0.87 ||
-        leftDifference > 0.99 ||
-        leftDifference < 0.1
-      ) {
-        // log(`adding spacing before: ${currentSpan.textContent}`);
-        currentSpan.setAttribute("data-needs-spacing", "true");
-      }
+/**
+ * Returns the box of the character at `index` in the text `node`, or null when
+ * it is not rendered.
+ */
+function characterRect(node, index) {
+  const range = document.createRange();
+  range.setStart(node, index);
+  range.setEnd(node, index + 1);
+  for (const rect of range.getClientRects()) {
+    if (rect.width > 0 || rect.height > 0) {
+      return {
+        top: rect.top,
+        bottom: rect.bottom,
+        left: rect.left,
+        right: rect.right,
+      };
     }
   }
+  return null;
+}
 
-  // Second pass: Insert spaces where needed, but before the span elements instead of inside them
-  for (const span of document.querySelectorAll(
-    'span[data-needs-spacing="true"]'
-  )) {
-    // Insert a space before the span element (not inside it)
-    if (span.parentElement) {
-      span.parentElement.insertBefore(document.createTextNode(" "), span);
-      // log(`inserted space before span: ${span.textContent}`);
-    } else {
-      //   logErrorMessage(
-      //     `Failed to insert space before span: ${span.textContent}`
-      //   );
-    }
-
-    // Remove the marker attribute
-    span.removeAttribute("data-needs-spacing");
+/**
+ * Returns how the text of `element` is drawn: { angle, fontSize }, the angle in
+ * radians and the font size once the CSS transforms of its ancestors are
+ * applied. `cache` maps elements to the transform they apply to their
+ * children ({ angle, scale }).
+ */
+function drawnTransform(element, cache) {
+  if (!element) {
+    return { angle: 0, fontSize: 0 };
   }
+  const { angle, scale } = transformOf(element, cache);
+  return {
+    angle,
+    fontSize: parseFloat(getComputedStyle(element).fontSize) * scale,
+  };
+}
+
+function transformOf(element, cache) {
+  if (!element) {
+    return { angle: 0, scale: 1 };
+  }
+  if (cache.has(element)) {
+    return cache.get(element);
+  }
+  let { angle, scale } = transformOf(element.parentElement, cache);
+  const matrix = /^matrix\(([^,]+),([^,]+),/.exec(
+    getComputedStyle(element).transform
+  );
+  if (matrix) {
+    const a = parseFloat(matrix[1]);
+    const b = parseFloat(matrix[2]);
+    angle += Math.atan2(b, a);
+    scale *= Math.hypot(a, b);
+  }
+  const transform = { angle, scale };
+  cache.set(element, transform);
+  return transform;
+}
+
+/**
+ * Returns the node to insert a space before so that it lands between
+ * `previous` and `node`: the outermost element that starts with `node` and
+ * does not contain `previous`, keeping the space out of the next word's
+ * element.
+ */
+function spaceInsertionPoint(node, previous) {
+  let point = node;
+  while (
+    !point.previousSibling &&
+    point.parentNode &&
+    point.parentNode !== document.body &&
+    !point.parentNode.contains(previous)
+  ) {
+    point = point.parentNode;
+  }
+  return point;
 }
 
 /**
@@ -604,10 +651,30 @@ export function DecorationGroup(groupId, groupName) {
     return cachedTextContentBounds;
   }
 
-  function isPageNumber(text) {
-    const trimmedText = text.trim();
-    // Only return true for strings that consist entirely of digits
-    return /^\d+$/.test(trimmedText);
+  // Rect of the first non-space character after `range`, or null.
+  function rectOfNextCharacter(range) {
+    let node = range.endContainer;
+    if (node.nodeType !== Node.TEXT_NODE) {
+      return null;
+    }
+    const walker = document.createTreeWalker(
+      document.body,
+      NodeFilter.SHOW_TEXT
+    );
+    walker.currentNode = node;
+    let offset = range.endOffset;
+    while (node) {
+      const index = node.data.slice(offset).search(/\S/);
+      if (index !== -1) {
+        const characterRange = document.createRange();
+        characterRange.setStart(node, offset + index);
+        characterRange.setEnd(node, offset + index + 1);
+        return characterRange.getBoundingClientRect();
+      }
+      node = walker.nextNode();
+      offset = 0;
+    }
+    return null;
   }
 
   function layoutEnhanced(item, postMessage, isRelayout = false) {
@@ -667,7 +734,8 @@ export function DecorationGroup(groupId, groupName) {
       return;
     }
 
-    // Start timing the isolated page number check
+    // Skip page numbers: they must not be highlighted nor read aloud. The
+    // decision itself lives in page-number.js, which is covered by tests.
     const startTime = performance.now();
 
     const text = item.decoration.locator.text.highlight;
@@ -676,158 +744,56 @@ export function DecorationGroup(groupId, groupName) {
 
       // Check position relative to the actual text content area, not the
       // viewport — handles pages where text is in a smaller centered section.
-      // Use a tight threshold when we measured real text bounds (OCR/fixed),
-      // and a more generous one when falling back to the viewport (regular books).
-      const textBounds = getTextContentBounds();
-      const textHeight = textBounds.maxY - textBounds.minY;
-      const relativeTop = boundingRect.top - textBounds.minY;
-      const posThreshold = textBounds.measured ? 0.05 : 0.15;
-      const isAtTopOrBottom =
-        textHeight > 0
-          ? relativeTop < textHeight * posThreshold ||
-            relativeTop > textHeight * (1 - posThreshold)
-          : false;
-
-      if (isAtTopOrBottom) {
+      if (isAtTopOrBottom(boundingRect.top, getTextContentBounds())) {
         log(`PAGE NUMBER :: is at top or bottom: ${text}`);
 
         const before = item.decoration.locator.text.before || "";
         const after = item.decoration.locator.text.after || "";
 
-        // IMPROVEMENT 2: Check for punctuation + whitespace pattern before page number
-        // This catches cases like "whole sleepover." followed by the page number
-        const beforeEndsWithPunctuationAndWhitespace = /[.!?;:]\s*$/.test(
-          before
-        );
-
-        // IMPROVEMENT 3: Check for multiple newlines or significant whitespace
-        const beforeHasMultipleNewlines = /\n\s*\n/.test(before);
-        const beforeEndsWithSignificantWhitespace = /\s{2,}$/.test(before);
-
-        // NEW IMPROVEMENT: Check what comes immediately before the number (after the last newline)
-        // If it's a word like "Chapter", "Section", "Part", etc., it's not a page number
-        const lastNewlineIndex = before.lastIndexOf("\n");
-        const immediateTextBefore =
-          lastNewlineIndex !== -1
-            ? before.substring(lastNewlineIndex + 1)
-            : before;
-        const beforeEndsWithWordAndSpace = /[a-zA-Z]\s+$/.test(
-          immediateTextBefore
-        );
-
-        // Check if the preceding text connects to this number via a
-        // digit + connecting character (e.g., "8:" → "30" = time "8:30").
-        // We collapse all whitespace to handle OCR layouts where each word
-        // is in its own element separated by newlines.
-        const beforeContentCollapsed = before.replace(/\s+/g, " ").trim();
-        const beforeConnectsToNumber = /\d[:-]$/.test(beforeContentCollapsed);
-
-        // Check if 'before' ends in newline, is empty, or has no alphanumeric characters
-        const beforeIsEmpty = before.length === 0;
-        const beforeEndsInNewline = before.endsWith("\n");
-        const beforeHasNoAlphanumeric = !/[a-zA-Z0-9]/.test(before);
-
-        // Check if 'after' begins with newline, is empty, or has no alphanumeric characters
-        const afterIsEmpty = after.length === 0;
-        const afterBeginsWithNewline = after.startsWith("\n");
-        const afterHasNoAlphanumeric = !/[a-zA-Z0-9]/.test(after);
-        // IMPROVEMENT 6: Check if 'after' begins with significant whitespace (space added by processSpansForTextSpacing)
-        const afterBeginsWithWhitespace = /^\s/.test(after);
-
-        // IMPROVEMENT 4: DOM structure check - is the page number in its own isolated element?
-        let isDOMIsolated = false;
+        let domIsolated = false;
         try {
           let startNode = item.range.startContainer;
           if (startNode.nodeType === Node.TEXT_NODE) {
             startNode = startNode.parentElement;
           }
-
-          // Check if this element only contains the page number (no other significant content)
-          const parentText = startNode.textContent.trim();
-          const isOnlyPageNumber = parentText === text.trim();
-
-          // Check if parent has very little content (just the page number)
-          const parentHasMinimalContent = parentText.length <= 5;
-
-          // In OCR-style layouts (text-overlay divs inside ocr-container),
-          // every word is in its own element, so DOM isolation is not meaningful.
-          const isInOCRLayout =
-            !!startNode.closest(".ocr-container") ||
-            startNode.classList.contains("text-overlay");
-
-          isDOMIsolated =
-            !isInOCRLayout && (isOnlyPageNumber || parentHasMinimalContent);
-
-          log(
-            `PAGE NUMBER :: DOM isolation check - parentText: "${parentText}", isOnlyPageNumber: ${isOnlyPageNumber}, isInOCRLayout: ${isInOCRLayout}, isDOMIsolated: ${isDOMIsolated}`
-          );
+          domIsolated = isDOMIsolated({
+            text,
+            parentText: startNode.textContent,
+            isInOCRLayout:
+              !!startNode.closest(".ocr-container") ||
+              startNode.classList.contains("text-overlay"),
+          });
         } catch (error) {
           log(`PAGE NUMBER :: DOM isolation check failed: ${error.message}`);
         }
 
-        // Original isolation check (keeping existing behavior)
-        const isIsolatedPageNumber =
-          (beforeIsEmpty || beforeEndsInNewline || beforeHasNoAlphanumeric) &&
-          (afterIsEmpty ||
-            afterBeginsWithNewline ||
-            afterHasNoAlphanumeric ||
-            afterBeginsWithWhitespace);
+        let followedOnSameLine = false;
+        try {
+          followedOnSameLine = continuesOnTheSameLine(
+            boundingRect,
+            rectOfNextCharacter(item.range)
+          );
+        } catch (error) {
+          log(`PAGE NUMBER :: next character check failed: ${error.message}`);
+        }
 
-        // IMPROVEMENT 5: Enhanced isolation check with additional patterns
-        // CRITICAL: Exclude numbers that immediately follow words (like "Chapter 1")
-        const isIsolatedWithEnhancements =
-          !beforeEndsWithWordAndSpace && // Exclude if preceded by word like "Chapter "
-          !beforeConnectsToNumber && // Exclude if part of compound like "8:30"
-          (isIsolatedPageNumber || // Keep original logic
-            (isDOMIsolated &&
-              (afterIsEmpty ||
-                afterBeginsWithNewline ||
-                afterHasNoAlphanumeric ||
-                afterBeginsWithWhitespace)) || // DOM + after check
-            (beforeEndsWithPunctuationAndWhitespace &&
-              isDOMIsolated &&
-              afterIsEmpty) || // Punctuation + DOM + end of content
-            (beforeHasMultipleNewlines &&
-              (afterIsEmpty ||
-                afterBeginsWithNewline ||
-                afterBeginsWithWhitespace)) || // Multiple newlines before
-            (beforeEndsWithSignificantWhitespace &&
-              isDOMIsolated &&
-              afterIsEmpty)); // Significant whitespace + DOM + end of content
+        const { isolated, checks } = pageNumberIsolation({
+          before,
+          after,
+          domIsolated,
+          followedOnSameLine,
+        });
 
-        // Calculate elapsed time
-        const endTime = performance.now();
-        const elapsedTime = endTime - startTime;
         log(
-          `PAGE NUMBER :: isolation check took ${elapsedTime.toFixed(
-            3
-          )} ms for: ${text}`
+          `PAGE NUMBER :: isolation check took ${(
+            performance.now() - startTime
+          ).toFixed(3)} ms for: ${text}`
         );
-
         log(`PAGE NUMBER :: before: "${before}"`);
-        log(
-          `PAGE NUMBER :: before is empty: ${beforeIsEmpty} | before ends in newline: ${beforeEndsInNewline} | before has no alphanumeric: ${beforeHasNoAlphanumeric}`
-        );
-        log(
-          `PAGE NUMBER :: before ends with punctuation+whitespace: ${beforeEndsWithPunctuationAndWhitespace} | has multiple newlines: ${beforeHasMultipleNewlines} | ends with significant whitespace: ${beforeEndsWithSignificantWhitespace}`
-        );
-        log(
-          `PAGE NUMBER :: immediate text before: "${immediateTextBefore}" | ends with word+space: ${beforeEndsWithWordAndSpace}`
-        );
-        log(
-          `PAGE NUMBER :: collapsed before: "${beforeContentCollapsed}" | connects to number: ${beforeConnectsToNumber}`
-        );
-
         log(`PAGE NUMBER :: after: "${after}"`);
-        log(
-          `PAGE NUMBER :: after is empty: ${afterIsEmpty} | after begins with newline: ${afterBeginsWithNewline} | after has no alphanumeric: ${afterHasNoAlphanumeric} | after begins with whitespace: ${afterBeginsWithWhitespace}`
-        );
+        log(`PAGE NUMBER :: checks: ${JSON.stringify(checks)}`);
 
-        log(
-          `PAGE NUMBER :: original isolated: ${isIsolatedPageNumber} | with enhancements: ${isIsolatedWithEnhancements}`
-        );
-
-        if (isIsolatedWithEnhancements) {
+        if (isolated) {
           log(`PAGE NUMBER :: is isolated: ${text}`);
           postMessageWithInvalidRect();
           return;
