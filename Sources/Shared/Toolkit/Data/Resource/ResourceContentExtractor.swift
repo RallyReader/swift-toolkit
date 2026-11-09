@@ -53,9 +53,10 @@ class HTMLResourceContentExtractor: ResourceContentExtractor {
                     // Rally: Fuzi drops HTML entities (" ' …) when parsing the XML, so the entities are unescaped
                     // before parsing. `&` and `"` are protected through the parsers with placeholders; line breaks
                     // and paragraph/div boundaries become new lines; the "ff" ligature is spelled out.
+                    // Every `<br>` (`<br/>`, `<br />`, with attributes) gets exactly one new line, like
+                    // `separateLineBreaks` in decorator.js gives it in the web view.
                     let unescapedContent = try Entities.unescape(content
-                        .replacingOccurrences(of: "<br />", with: "<br /\n>")
-                        .replacingOccurrences(of: "<br/>", with: "<br/>\n")
+                        .replacingOccurrences(of: #"<br\b[^>]*>"#, with: "$0\n", options: .regularExpression)
                         .replacingOccurrences(of: "/p><p", with: "/p>\n<p")
                         .replacingOccurrences(of: "/div><div", with: "/div>\n<div")
                         .replacingOccurrences(of: "&amp;", with: "ampToand")

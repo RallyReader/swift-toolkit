@@ -53,6 +53,36 @@ describe("ligatures", () => {
 describe("line breaks", () => {
   test("a newline is inserted after every <br/>", () => {
     expect(registerTemplates("<p>one<br/>two</p>")).toBe("one\ntwo");
+    expect(document.querySelectorAll("br")).toHaveLength(1);
+  });
+
+  test("a <br> with attributes gets its newline too", () => {
+    expect(registerTemplates('<p>one<br class="x"/>two</p>')).toBe("one\ntwo");
+  });
+
+  test("consecutive <br> get one newline each", () => {
+    expect(registerTemplates("<p>one<br/><br/>two</p>")).toBe("one\n\ntwo");
+  });
+
+  test("a <br> before a <div> or <p> gets one newline, not one more for the block", () => {
+    expect(registerTemplates("<div>one<br/><div>two</div></div>")).toBe(
+      "one\ntwo"
+    );
+    expect(registerTemplates("<div>one<br/><p>two</p></div>")).toBe("one\ntwo");
+  });
+
+  test("the newline joins the text of the next line, as the innerHTML rewrite left it", () => {
+    registerTemplates("<p>one<br/>two</p>");
+    expect(document.querySelector("br").nextSibling.nodeValue).toBe("\ntwo");
+  });
+
+  test("where newlines are drawn, the newline replaces the <br>, so the line breaks once", () => {
+    // jsdom doesn't inherit white-space, so the style is on the <br> itself. ReadiumScriptsTests
+    // covers pre text boxes in WebKit.
+    expect(
+      registerTemplates('<p>one<br style="white-space: pre"/>two</p>')
+    ).toBe("one\ntwo");
+    expect(document.querySelectorAll("br")).toHaveLength(0);
   });
 
   test("a newline is inserted before a <p> or <div> that does not follow one", () => {
