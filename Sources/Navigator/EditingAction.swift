@@ -200,17 +200,19 @@ final class EditingActionsController {
     @available(iOS 13.0, *)
     func buildMenu(with builder: UIMenuBuilder) {
         // Rally: remove the system menus so only the custom editing actions
-        // remain, except on iOS (RR-9388):
-        //  - Speak (Accessibility > Spoken Content > Speak Selection), for
-        //    students who need to hear a passage, read it, and hear it again;
-        //  - the configured actions of the Look Up group, such as Translate,
-        //    for multilingual classrooms. Its other items (Look Up, Find
-        //    Selection) go unless they are configured.
+        // remain, except on iOS for the configured actions of the Look Up
+        // group, such as Translate, for multilingual classrooms (RR-9388).
+        // Its other items (Look Up, Find Selection) go unless they are
+        // configured.
+        // The Speech menu (Speak Selection's Speak and Spell) goes too: the
+        // app offers its own Speak and Spell, so that it can stop listening
+        // while they play (RR-9564). iOS doesn't tell the app when its own
+        // speech starts or ends.
         // On Mac, AppKit shows the actions it can't perform greyed out instead
         // of hiding them, so every system menu goes.
+        builder.remove(menu: .speech)
         if Self.isiOSAppOnMac {
             builder.remove(menu: .lookup)
-            builder.remove(menu: .speech)
         } else if let lookup = builder.menu(for: .lookup) {
             let children = configuredElements(lookup.children)
             if children.isEmpty {
