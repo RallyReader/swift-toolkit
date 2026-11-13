@@ -63,11 +63,21 @@ export function rangeClientRects(range) {
   return measuredOnCopy(range) || rects;
 }
 
-/** Rally (RR-6363): the bounding rect of `range`; see `rangeClientRects`. */
+/**
+ * Rally (RR-6363): the bounding rect of `range`; see `rangeClientRects`.
+ *
+ * Rally (RR-9599): the union of the boxes drawn for it (`unionOfDrawnRects`), not
+ * `getBoundingClientRect()`, which also counts the zero-width rects at a line's
+ * edge. A word right before a <br> (every iOS), or right after a kept newline
+ * (iOS 17 and 18's WebKit, `white-space: pre` and the like), came out two lines
+ * tall, from the line above or into the line below. The highlight drawn
+ * (`getClientRectsNoOverlap`) was right; the rect the app was told (where the
+ * word help bubble and the word burst go) was not.
+ */
 export function rangeBoundingRect(range) {
   const rect = range.getBoundingClientRect();
   if (!isMismeasured(range, [rect])) {
-    return rect;
+    return unionOfDrawnRects(Array.from(range.getClientRects())) || rect;
   }
   const rects = measuredOnCopy(range);
   return rects && rects.length > 0 ? unionOf(rects) : rect;
@@ -151,6 +161,15 @@ function makeRect(left, top, width, height) {
       };
     },
   };
+}
+
+/**
+ * Rally (RR-9599): the union of `rects` bigger than the "boxes" highlight's
+ * minimum area (`getClientRectsNoOverlap` drops the rest), or null when none is.
+ */
+export function unionOfDrawnRects(rects, minArea = 2 * 2) {
+  const drawn = rects.filter((rect) => rect.width * rect.height > minArea);
+  return drawn.length > 0 ? unionOf(drawn) : null;
 }
 
 function unionOf(rects) {

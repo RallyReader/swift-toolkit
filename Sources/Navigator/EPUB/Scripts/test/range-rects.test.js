@@ -148,7 +148,14 @@ describe("a range WebKit measures right", () => {
     document.body.innerHTML = '<p class="p1">\n\t“Oh, my. ”\n</p>';
     const range = rangeOf("my");
     expect(rangeClientRects(range)).toEqual([measureRange(range)]);
-    expect(rangeBoundingRect(range)).toEqual(range.getBoundingClientRect());
+    // The same box; since RR-9599 it is the union of the drawn rects, not the DOMRect itself.
+    const { left, top, width, height } = range.getBoundingClientRect();
+    expect(rangeBoundingRect(range)).toMatchObject({
+      left,
+      top,
+      width,
+      height,
+    });
   });
 });
 
