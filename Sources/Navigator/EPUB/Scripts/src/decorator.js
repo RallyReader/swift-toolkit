@@ -6,6 +6,7 @@
 
 import {
   getClientRectsNoOverlap,
+  rangeBoundingRect,
   rectContainsPoint,
   toNativeRect,
 } from "./rect";
@@ -360,7 +361,7 @@ export function handleDecorationClickEvent(event, clickEvent) {
   webkit.messageHandlers.decorationActivated.postMessage({
     id: target.item.decoration.id,
     group: target.group,
-    rect: toNativeRect(target.item.range.getBoundingClientRect()),
+    rect: toNativeRect(rangeBoundingRect(target.item.range)),
     click: clickEvent,
   });
   return true;
@@ -646,7 +647,7 @@ export function DecorationGroup(groupId, groupName) {
       }
     }
 
-    let boundingRect = item.range.getBoundingClientRect();
+    let boundingRect = rangeBoundingRect(item.range);
 
     let elementTemplate;
     try {
@@ -792,7 +793,7 @@ export function DecorationGroup(groupId, groupName) {
     }
 
     // Get the bounding rect for the decoration
-    let boundingRect = item.range.getBoundingClientRect();
+    let boundingRect = rangeBoundingRect(item.range);
 
     // Calculate which page (container) this decoration belongs to based on its left position
     let viewportWidth = window.innerWidth;

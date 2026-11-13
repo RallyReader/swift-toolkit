@@ -12,7 +12,11 @@ import {
   getCurrentSelectionLazy,
   getTextFrom,
 } from "./selection";
-import { getClientRectsNoOverlap, toNativeRect } from "./rect";
+import {
+  getClientRectsNoOverlap,
+  rangeBoundingRect,
+  toNativeRect,
+} from "./rect";
 
 /**
  * Least Recently Used Cache with a limit wraping a Map object
@@ -300,7 +304,7 @@ export function rectFromLocator(locator) {
     return toNativeRect(ocrRect);
   }
 
-  return toNativeRect(range.getBoundingClientRect());
+  return toNativeRect(rangeBoundingRect(range));
 }
 
 /**
