@@ -42,11 +42,149 @@ export function adjustPointToViewport(point) {
   };
 }
 
+/**
+ * Rally (RR-6363): the client rects of `range`.
+ *
+ * WebKit before iOS 27 measures a range in text drawn with a `::first-letter`
+ * style as a caret 0 wide at the end of its line, for every word of the
+ * paragraph ("Dog and Bear: Three to Get Ready", 9781429995566:
+ * `.page006 .p1:first-letter { font-size: 40px; }`). Read aloud took such a word
+ * for one not on the page and skipped it, and its mark drew nothing. An element
+ * measures right, so such a range is measured again on a hidden copy of its
+ * element, with its text wrapped in a span, and the rects are moved back onto
+ * the element. The page's own DOM, and so every live range (decorations keep
+ * theirs), is never changed.
+ */
+export function rangeClientRects(range) {
+  const rects = Array.from(range.getClientRects());
+  if (!isMismeasured(range, rects)) {
+    return rects;
+  }
+  return measuredOnCopy(range) || rects;
+}
+
+/**
+ * Rally (RR-6363): the bounding rect of `range`; see `rangeClientRects`.
+ *
+ * Rally (RR-9599): the union of the boxes drawn for it (`unionOfDrawnRects`), not
+ * `getBoundingClientRect()`, which also counts the zero-width rects at a line's
+ * edge. A word right before a <br> (every iOS), or right after a kept newline
+ * (iOS 17 and 18's WebKit, `white-space: pre` and the like), came out two lines
+ * tall, from the line above or into the line below. The highlight drawn
+ * (`getClientRectsNoOverlap`) was right; the rect the app was told (where the
+ * word help bubble and the word burst go) was not.
+ */
+export function rangeBoundingRect(range) {
+  const rect = range.getBoundingClientRect();
+  if (!isMismeasured(range, [rect])) {
+    return unionOfDrawnRects(Array.from(range.getClientRects())) || rect;
+  }
+  const rects = measuredOnCopy(range);
+  return rects && rects.length > 0 ? unionOf(rects) : rect;
+}
+
+/** Text that shows, measured only as carets: every rect 0 wide but as tall as a line. */
+function isMismeasured(range, rects) {
+  return (
+    !range.collapsed &&
+    rects.length > 0 &&
+    rects.every((rect) => rect.width === 0 && rect.height > 0) &&
+    /\S/.test(range.toString())
+  );
+}
+
+/**
+ * The client rects of `range` (within one text node) measured on a copy of its
+ * element: the copy goes in just before the element, so it matches the same
+ * selectors (`:first-child`, `p + p`), is hidden, and is removed before anything
+ * is drawn. Null when the range spans nodes or the copy can't be measured.
+ */
+function measuredOnCopy(range) {
+  const node = range.startContainer;
+  if (node !== range.endContainer || node.nodeType !== Node.TEXT_NODE) {
+    return null;
+  }
+  const element = node.parentElement;
+  if (!element || !element.parentNode) {
+    return null;
+  }
+  const index = Array.prototype.indexOf.call(element.childNodes, node);
+  // Before the copy shifts it.
+  const elementRect = element.getBoundingClientRect();
+  const copy = element.cloneNode(true);
+  copy.setAttribute("aria-hidden", "true");
+  copy.style.visibility = "hidden";
+  copy.style.pointerEvents = "none";
+  element.parentNode.insertBefore(copy, element);
+  try {
+    const copyNode = copy.childNodes[index];
+    const copyRange = document.createRange();
+    copyRange.setStart(copyNode, range.startOffset);
+    copyRange.setEnd(copyNode, range.endOffset);
+    const span = document.createElement("span");
+    copyRange.surroundContents(span);
+    const copyRect = copy.getBoundingClientRect();
+    const dx = elementRect.left - copyRect.left;
+    const dy = elementRect.top - copyRect.top;
+    const rects = Array.from(span.getClientRects())
+      .filter((rect) => rect.width > 0)
+      .map((rect) =>
+        makeRect(rect.left + dx, rect.top + dy, rect.width, rect.height)
+      );
+    return rects.length > 0 ? rects : null;
+  } catch (error) {
+    logNative(`measuring a range on a copy failed: ${error.message}`);
+    return null;
+  } finally {
+    copy.remove();
+  }
+}
+
+function makeRect(left, top, width, height) {
+  return {
+    left,
+    top,
+    width,
+    height,
+    right: left + width,
+    bottom: top + height,
+    x: left,
+    y: top,
+    toJSON() {
+      return {
+        left,
+        top,
+        width,
+        height,
+        right: left + width,
+        bottom: top + height,
+      };
+    },
+  };
+}
+
+/**
+ * Rally (RR-9599): the union of `rects` bigger than the "boxes" highlight's
+ * minimum area (`getClientRectsNoOverlap` drops the rest), or null when none is.
+ */
+export function unionOfDrawnRects(rects, minArea = 2 * 2) {
+  const drawn = rects.filter((rect) => rect.width * rect.height > minArea);
+  return drawn.length > 0 ? unionOf(drawn) : null;
+}
+
+function unionOf(rects) {
+  const left = Math.min(...rects.map((rect) => rect.left));
+  const top = Math.min(...rects.map((rect) => rect.top));
+  const right = Math.max(...rects.map((rect) => rect.right));
+  const bottom = Math.max(...rects.map((rect) => rect.bottom));
+  return makeRect(left, top, right - left, bottom - top);
+}
+
 export function getClientRectsNoOverlap(
   range,
   doNotMergeHorizontallyAlignedRects
 ) {
-  let clientRects = range.getClientRects();
+  let clientRects = rangeClientRects(range);
 
   const tolerance = 1;
   const originalRects = [];
