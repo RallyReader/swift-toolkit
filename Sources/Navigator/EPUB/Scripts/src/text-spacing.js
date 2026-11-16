@@ -17,12 +17,14 @@
 // kerning inside a word stays under ~0.15em (~0.12 of the line box).
 const WORD_GAP_RATIO = 0.2;
 
-// A drop cap is a single letter drawn at least this many times larger than the
+// A drop cap is a single letter, possibly after its opening quote or bracket
+// ("N in Treasure Island), drawn at least this many times larger than the
 // text that follows it. Its margin makes the gap to the rest of its word wider
 // than kerning, so it may be up to DROP_CAP_GAP_RATIO of the line height. A
 // drop cap followed by a separate word also has a word space on top of that.
 const DROP_CAP_MIN_SIZE_RATIO = 2;
 const DROP_CAP_GAP_RATIO = 0.5;
+const OPENING_PUNCTUATION = /^[\p{Pi}\p{Ps}"']+/u;
 
 // Two rects whose vertical overlap covers at least this share of the shorter
 // one are on the same line. A drop cap counts as being on the line it starts.
@@ -149,7 +151,7 @@ export function needsSpaceBetween(previous, next) {
  * Whether `previous` looks like the drop cap starting the word in `next`.
  */
 function isDropCap(previous, next) {
-  const letter = previous.text;
+  const letter = previous.text.replace(OPENING_PUNCTUATION, "");
   return (
     letter.length === 1 &&
     letter.toLowerCase() !== letter.toUpperCase() &&
