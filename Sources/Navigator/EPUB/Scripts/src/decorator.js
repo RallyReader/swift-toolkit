@@ -25,6 +25,7 @@ import {
   pageNumberIsolation,
 } from "./page-number";
 import { keepsNewlines } from "./line-breaks";
+import { drawsNoText, hiddenLinesLayout, lineExtent } from "./hidden-text";
 import {
   joinsAcrossUndrawnWhitespace,
   needsSpaceBetween,
@@ -108,6 +109,16 @@ export function registerTemplates(newStyles) {
   processSpansForTextSpacing();
   // log(`Document body text content AFTER: ${document.body.textContent}`);
 
+  // After the text preparation, whose `innerHTML` rewrites replace the
+  // elements: the styles go on the ones the page keeps.
+  if (window.readium && window.readium.isFixedLayout) {
+    layHiddenTextOnItsLines();
+    // A web font that arrives later changes the widths: measure again then.
+    if (document.fonts && document.fonts.status === "loading") {
+      document.fonts.ready.then(layHiddenTextOnItsLines);
+    }
+  }
+
   // log(
   //   `DID REGISTER TEMPLATES for ${
   //     document.location.href || document.title || "document"
@@ -176,6 +187,158 @@ function processSpansForTextSpacing() {
 
   const joined = joinGlyphsAcrossUndrawnWhitespace();
   insertSpacesBetweenTextFragments(joined);
+}
+
+/**
+ * The inline styles `layHiddenTextOnItsLines` changed, by element, as the book
+ * had them, so a second pass starts from the book's layout.
+ */
+const hiddenTextInlineStyles = new Map();
+
+/**
+ * Rally (RR-9323): lays hidden text whose lines the book breaks with <br> out
+ * on those lines, as the text printed in the picture under it is
+ * (hidden-text.js): keeps it from wrapping, and narrows a line a little wider
+ * than its box to fit. Fixed layouts only. Text that shows is left alone: it
+ * is drawn where it is laid out.
+ *
+ * A line is narrowed with a smaller font, its line height kept in px, so every
+ * line stays where it was and keeps its own alignment. A transform would not:
+ * WebKit starts a line too wide for its box at the box's start whatever the
+ * alignment, so a centred block squeezed toward its centre moved such a line
+ * a word to the right ("Good Night, Escargot" p.2, the dedication).
+ *
+ * Every style is read before the first change, and every width after it, so
+ * the page is laid out twice, once more where a line is narrowed.
+ */
+function layHiddenTextOnItsLines() {
+  try {
+    restoreHiddenTextStyles();
+
+    const blocks = [];
+    for (const lineBreak of document.body.getElementsByTagName("br")) {
+      const block = blockAround(lineBreak);
+      if (block && !blocks.includes(block)) {
+        blocks.push(block);
+      }
+    }
+    const hidden = blocks.filter(isHiddenText);
+    if (hidden.length === 0) {
+      return;
+    }
+
+    hidden.forEach((block) => {
+      hiddenTextInlineStyles.set(block, {
+        whiteSpace: inlineStyle(block, "white-space"),
+        fontSize: inlineStyle(block, "font-size"),
+        lineHeight: inlineStyle(block, "line-height"),
+      });
+      block.style.setProperty("white-space", "nowrap", "important");
+    });
+
+    const measures = hidden.map((block) => {
+      const style = getComputedStyle(block);
+      // The box's own fractional edges, as the text's rects are measured:
+      // `clientWidth` rounds down, and a box as wide as its text (positioned,
+      // no width) came out a fraction of a px too narrow for it.
+      const box = block.getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(block);
+      const bounds = rangeBoundingRect(range);
+      const extent = lineExtent({
+        textLeft: bounds.left,
+        textRight: bounds.right,
+        boxLeft:
+          box.left +
+          (parseFloat(style.paddingLeft) || 0) +
+          (parseFloat(style.borderLeftWidth) || 0),
+        boxRight:
+          box.right -
+          (parseFloat(style.paddingRight) || 0) -
+          (parseFloat(style.borderRightWidth) || 0),
+        direction: style.direction,
+      });
+      const layout = hiddenLinesLayout(extent);
+      // "normal" has no px value: the lines' own height, now one per <br>.
+      const lines = block.getElementsByTagName("br").length + 1;
+      const lineHeight =
+        style.lineHeight === "normal"
+          ? bounds.height / lines
+          : parseFloat(style.lineHeight);
+      log(
+        `HIDDEN TEXT :: ${JSON.stringify(extent)}: ${JSON.stringify(layout)}`
+      );
+      return { layout, fontSize: parseFloat(style.fontSize), lineHeight };
+    });
+
+    hidden.forEach((block, index) => {
+      const { layout, fontSize, lineHeight } = measures[index];
+      if (!layout.nowrap) {
+        restoreInlineStyle(
+          block,
+          "white-space",
+          hiddenTextInlineStyles.get(block).whiteSpace
+        );
+        hiddenTextInlineStyles.delete(block);
+      } else if (layout.scale < 1 && fontSize > 0 && lineHeight > 0) {
+        block.style.setProperty("line-height", `${lineHeight}px`, "important");
+        block.style.setProperty(
+          "font-size",
+          `${fontSize * layout.scale}px`,
+          "important"
+        );
+      }
+    });
+  } catch (error) {
+    logErrorMessage(`Hidden text lines: ${error.message}`);
+  }
+}
+
+function restoreHiddenTextStyles() {
+  hiddenTextInlineStyles.forEach((original, block) => {
+    restoreInlineStyle(block, "white-space", original.whiteSpace);
+    restoreInlineStyle(block, "font-size", original.fontSize);
+    restoreInlineStyle(block, "line-height", original.lineHeight);
+  });
+  hiddenTextInlineStyles.clear();
+}
+
+function inlineStyle(element, property) {
+  return {
+    value: element.style.getPropertyValue(property),
+    priority: element.style.getPropertyPriority(property),
+  };
+}
+
+function restoreInlineStyle(element, property, { value, priority }) {
+  element.style.setProperty(property, value, priority);
+}
+
+/** The nearest element around `node` that lays out lines (not an inline one). */
+function blockAround(node) {
+  let element = node.parentElement;
+  while (element && element !== document.body) {
+    const display = getComputedStyle(element).display;
+    if (display !== "inline" && display !== "contents") {
+      return element;
+    }
+    element = element.parentElement;
+  }
+  return null;
+}
+
+/** Whether the text of `element` draws nothing (hidden-text.js). */
+function isHiddenText(element) {
+  const opacities = [];
+  for (let node = element; node; node = node.parentElement) {
+    opacities.push(getComputedStyle(node).opacity);
+  }
+  const style = getComputedStyle(element);
+  return drawsNoText({
+    opacities,
+    color: style.color,
+    textFillColor: style.webkitTextFillColor,
+  });
 }
 
 /**
