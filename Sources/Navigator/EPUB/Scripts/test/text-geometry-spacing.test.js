@@ -16,6 +16,7 @@
 
 import {
   isOnSameLine,
+  joinsAcrossUndrawnWhitespace,
   needsSpaceBetween,
   toTextFrame,
 } from "../src/text-spacing";
@@ -212,5 +213,75 @@ describe("toTextFrame", () => {
     );
     expect(second.left >= first.right - 0.5).toBe(true);
     expect(Math.abs(first.top - second.top) < 0.001).toBe(true);
+  });
+});
+
+// Pieces with only whitespace the page does not draw between them (RR-6140).
+// Boxes measured in WebKit on "I play" (9781626725126), whose words bounce one
+// letter per <p>, in a fallback font (the page's own font is not bundled).
+describe("joinsAcrossUndrawnWhitespace", () => {
+  test("joins: letters of a bouncing word (p.3: 'r' 'u')", () => {
+    expect(
+      joinsAcrossUndrawnWhitespace(
+        piece("r", [488, 586, 208, 251]),
+        piece("u", [491, 591, 244, 301])
+      )
+    ).toBe(true);
+  });
+  test("joins: two letters, then one (p.4: 'ju' 'm')", () => {
+    expect(
+      joinsAcrossUndrawnWhitespace(
+        piece("ju", [570, 665, 406, 496]),
+        piece("m", [568, 672, 490, 581])
+      )
+    ).toBe(true);
+  });
+  test("joins: letters tilted opposite ways (p.7: 'n' at 17° 'c' at -18°)", () => {
+    expect(
+      joinsAcrossUndrawnWhitespace(
+        piece("n", [109.3, 201.3, 406.6, 483.5], 0.2967, 85),
+        piece("c", [114.7, 204.7, 459.1, 529.5], -0.3142, 85)
+      )
+    ).toBe(true);
+  });
+  test("leaves apart: pieces longer than two characters, however close", () => {
+    expect(
+      joinsAcrossUndrawnWhitespace(
+        piece("Big", [488, 586, 100, 251]),
+        piece("and", [491, 591, 244, 400])
+      )
+    ).toBe(false);
+  });
+  test("leaves apart: a letter on another line", () => {
+    expect(
+      joinsAcrossUndrawnWhitespace(
+        piece("o", [0, 30, 268, 283]),
+        piece("D", [40, 64, 17, 35])
+      )
+    ).toBe(false);
+  });
+  test("leaves apart: a letter after a word gap", () => {
+    expect(
+      joinsAcrossUndrawnWhitespace(
+        piece("a", [0, 100, 0, 50]),
+        piece("I", [0, 100, 80, 100])
+      )
+    ).toBe(false);
+  });
+  test("leaves apart: a piece that is not rendered", () => {
+    expect(
+      joinsAcrossUndrawnWhitespace(
+        { text: "r", rect: null, angle: 0, fontSize: 0 },
+        piece("u", [491, 591, 244, 301])
+      )
+    ).toBe(false);
+  });
+  test("leaves apart: a piece that already ends with whitespace", () => {
+    expect(
+      joinsAcrossUndrawnWhitespace(
+        piece("r ", [488, 586, 208, 251]),
+        piece("u", [491, 591, 244, 301])
+      )
+    ).toBe(false);
   });
 });

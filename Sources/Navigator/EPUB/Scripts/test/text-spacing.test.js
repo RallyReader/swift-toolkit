@@ -180,6 +180,147 @@ describe("fragment spacing (RR-6094)", () => {
   });
 });
 
+describe("glyphs split by whitespace the page does not draw (RR-6140)", () => {
+  // Curved and bouncing words drawn one glyph per element, with a newline between the elements in
+  // the markup: SVG <text> elements (9781338747836) or <p> elements (9781626725126). jsdom has no
+  // layout, so each element's text is drawn at its `data-box` ("top bottom left right"), and text
+  // without one (the whitespace between the elements) is not drawn.
+  let getClientRects;
+  beforeEach(() => {
+    getClientRects = Range.prototype.getClientRects;
+    Range.prototype.getClientRects = function () {
+      const box = this.startContainer.parentElement?.dataset?.box;
+      if (!box) {
+        return [];
+      }
+      const [top, bottom, left, right] = box.split(" ").map(Number);
+      return [
+        { top, bottom, left, right, width: right - left, height: bottom - top },
+      ];
+    };
+  });
+  afterEach(() => {
+    Range.prototype.getClientRects = getClientRects;
+  });
+
+  const block = (text, box) => `<p data-box="${box}">${text}</p>`;
+  const glyph = (text, box) => `<text data-box="${box}">${text}</text>`;
+  const svg = (content) =>
+    `<svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve">${content}</svg>`;
+
+  test("letters in blocks of their own, drawn as one word, read as one word", () => {
+    expect(
+      registerTemplates(
+        `<div>${block("r", "488 586 208 251")}\n${block(
+          "u",
+          "491 591 244 301"
+        )}\n${block("n", "490 592 289 351")}</div>`
+      ).trim()
+    ).toBe("run");
+  });
+
+  test("two-letter pieces drawn as one word read as one word", () => {
+    expect(
+      registerTemplates(
+        `<div>${block("ju", "570 665 406 496")}\n${block(
+          "m",
+          "568 672 490 581"
+        )}\n${block("p", "587 695 555 639")}</div>`
+      ).trim()
+    ).toBe("jump");
+  });
+
+  test("SVG letters read as words, split where a space is drawn", () => {
+    expect(
+      registerTemplates(
+        svg(
+          `\n${glyph("g", "0 30 0 15")}\n${glyph("o", "0 30 15 30")}\n${glyph(
+            " ",
+            "0 30 30 38"
+          )}\n${glyph("u", "0 30 38 53")}\n${glyph("p", "0 30 53 68")}\n`
+        )
+      ).trim()
+    ).toBe("go\n \nup");
+  });
+
+  test("SVG letters on the next line start a new word", () => {
+    expect(
+      registerTemplates(
+        svg(
+          `${glyph("o", "0 30 268 283")}\n${glyph(
+            ".",
+            "0 30 283 290"
+          )}\n${glyph("D", "40 64 17 35")}\n${glyph("a", "40 64 36 48")}`
+        )
+      )
+    ).toBe("o.\nDa");
+  });
+
+  test("letters with a word gap between them stay apart", () => {
+    expect(
+      registerTemplates(
+        `<div>${block("a", "0 100 0 50")}\n${block("I", "0 100 80 100")}</div>`
+      )
+    ).toBe("\na\nI");
+  });
+
+  test("whole words in blocks of their own stay apart, however close", () => {
+    expect(
+      registerTemplates(
+        `<div>${block("Big", "0 100 0 150")}\n${block(
+          "and",
+          "0 100 150 300"
+        )}</div>`
+      )
+    ).toBe("\nBig\nand");
+  });
+
+  test("short words in OCR overlays stay apart, however close", () => {
+    const overlay = (text, box) =>
+      `<div class="text-overlay" data-box="${box}">${text}</div>`;
+    expect(
+      registerTemplates(
+        `<div class="ocr-container">${overlay("to", "0 100 0 60")}\n${overlay(
+          "be",
+          "0 100 30 90"
+        )}</div>`
+      )
+    ).toBe("\nto\nbe");
+  });
+
+  test("letters separated by a <br> stay apart", () => {
+    expect(
+      registerTemplates(
+        `<div><span data-box="0 100 0 50">a</span><br/><span data-box="0 100 50 100">b</span></div>`
+      )
+    ).toBe("a\nb");
+  });
+
+  test("letters separated by a <br> and a newline stay apart", () => {
+    expect(
+      registerTemplates(
+        `<div><span data-box="0 100 0 50">a</span><br/>\n<span data-box="0 100 50 100">b</span></div>`
+      )
+    ).toBe("a\n\nb");
+  });
+
+  test("whitespace that is drawn stays", () => {
+    expect(
+      registerTemplates(
+        `<div data-box="0 100 0 100"><span data-box="0 100 0 50">a</span> <span data-box="0 100 50 100">b</span></div>`
+      )
+    ).toBe("a b");
+  });
+
+  test("whitespace in text that keeps its newlines stays", () => {
+    expect(
+      registerTemplates(
+        `<div style="white-space: pre"><span data-box="0 100 0 50">a</span>\n<span data-box="0 100 50 100">b</span></div>`
+      )
+    ).toBe("a\nb");
+  });
+});
+
 describe("getHtmlBodyTextContent", () => {
   test("returns the body text after the rewrite", () => {
     const text = registerTemplates("<p>one<br/>two</p><p>ﬁve</p>");

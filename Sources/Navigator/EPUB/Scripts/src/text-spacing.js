@@ -8,7 +8,10 @@
 // no whitespace between them are separate words. Fixed layouts converted from
 // PDF draw every fragment as its own positioned element, so `textContent`
 // glues "A" + "rt" + "is" into "Artis" unless we add a space where the page
-// shows a gap. Kept free of DOM access so the scenarios can be tested in Node
+// shows a gap. The reverse happens too: letters drawn one by one, with a
+// newline between their elements that the page does not draw, read as
+// "R u m b l e" unless that newline goes (RR-6140,
+// `joinsAcrossUndrawnWhitespace`). Kept free of DOM access so the scenarios can be tested in Node
 // (test/text-geometry-spacing.test.js): `decorator.js` measures the page and passes
 // plain values in.
 
@@ -105,14 +108,25 @@ export function needsSpaceBetween(previous, next) {
   if (!previous.rect || !next.rect) {
     return false;
   }
+  return isDrawnApart(previous, next, { eachGlyphTilts: false });
+}
 
+/**
+ * Whether `previous` and `next`, both rendered, are drawn as separate words.
+ *
+ * With `eachGlyphTilts`, the pieces are single glyphs that may each be tilted
+ * their own way (a bouncing word's "n" at +17° and "c" at -18°), so a change of
+ * direction does not separate them: they are compared in the frame of their
+ * average angle.
+ */
+function isDrawnApart(previous, next, { eachGlyphTilts }) {
   const previousAngle = previous.angle || 0;
   const nextAngle = next.angle || 0;
   const turn = Math.atan2(
     Math.sin(nextAngle - previousAngle),
     Math.cos(nextAngle - previousAngle)
   );
-  if (Math.abs(turn) > SAME_DIRECTION_MAX_ANGLE) {
+  if (!eachGlyphTilts && Math.abs(turn) > SAME_DIRECTION_MAX_ANGLE) {
     return true;
   }
   const angle = previousAngle + turn / 2;
@@ -145,6 +159,47 @@ export function needsSpaceBetween(previous, next) {
     ? DROP_CAP_GAP_RATIO
     : WORD_GAP_RATIO;
   return gap > height * gapRatio || gap < -height;
+}
+
+// Pieces no longer than this (in characters) are a glyph or two drawn on their
+// own: the letters of a curved or bouncing word, each in its own SVG <text> or
+// <p> (RR-6140). Whole words drawn as separate pieces are longer, apart from
+// short ones ("to", "be") that only OCR overlays lay out this way, and those
+// never split a word.
+const GLYPH_PIECE_MAX_LENGTH = 2;
+
+/**
+ * Whether whitespace the page does not draw, and that is all that separates
+ * `previous` and `next` in the DOM, falls inside one word, so it can go.
+ *
+ * Publishers that draw every letter of a word on its own put a newline between
+ * the elements in their markup. SVG never draws text outside its <text>
+ * elements, and the newline between two blocks is not drawn either, but
+ * `textContent` keeps it, so "Rumble" reads as "R u m b l e". Only glyph-size
+ * pieces drawn as one word (on one line, with no word gap, as in
+ * `needsSpaceBetween`) are joined: a word left whole in its own element keeps
+ * the whitespace after it. Each glyph may be tilted its own way.
+ *
+ * `previous` and `next` are as in `needsSpaceBetween`.
+ */
+export function joinsAcrossUndrawnWhitespace(previous, next) {
+  if (/\s$/.test(previous.text) || /^\s/.test(next.text)) {
+    return false;
+  }
+  if (
+    !isGlyphPiece(previous.text) ||
+    !isGlyphPiece(next.text) ||
+    !previous.rect ||
+    !next.rect
+  ) {
+    return false;
+  }
+  return !isDrawnApart(previous, next, { eachGlyphTilts: true });
+}
+
+function isGlyphPiece(text) {
+  const length = Array.from(text).length;
+  return length > 0 && length <= GLYPH_PIECE_MAX_LENGTH;
 }
 
 /**

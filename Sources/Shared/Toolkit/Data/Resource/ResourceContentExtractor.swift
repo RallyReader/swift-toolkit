@@ -54,8 +54,9 @@ class HTMLResourceContentExtractor: ResourceContentExtractor {
                     // before parsing. `&` and `"` are protected through the parsers with placeholders; line breaks
                     // and paragraph/div boundaries become new lines; the "ff" ligature is spelled out.
                     // Every `<br>` (`<br/>`, `<br />`, with attributes) gets exactly one new line, like
-                    // `separateLineBreaks` in decorator.js gives it in the web view.
-                    let unescapedContent = try Entities.unescape(content
+                    // `separateLineBreaks` in decorator.js gives it in the web view. A word drawn one glyph per
+                    // SVG `<text>` loses the newlines between them, like `joinGlyphsAcrossUndrawnWhitespace`.
+                    let unescapedContent = try Entities.unescape(Self.joiningSVGGlyphs(in: content)
                         .replacingOccurrences(of: #"<br\b[^>]*>"#, with: "$0\n", options: .regularExpression)
                         .replacingOccurrences(of: "/p><p", with: "/p>\n<p")
                         .replacingOccurrences(of: "/div><div", with: "/div>\n<div")
@@ -238,4 +239,134 @@ class HTMLResourceContentExtractor: ResourceContentExtractor {
     private func parse(html: String) -> String? {
         try? SwiftSoup.parse(html).body()?.text()
     }
+}
+
+// MARK: - Words drawn one glyph per SVG <text> (Rally, RR-6140)
+
+extension HTMLResourceContentExtractor {
+    /// Removes the whitespace between two SVG `<text>` elements that draw one word together.
+    ///
+    /// Curved titles converted from print draw every glyph in its own `<text>`, with a newline
+    /// between the elements in the markup. SVG draws no text outside its `<text>` elements, so the
+    /// newline separates nothing on the page, but the text kept it: "Rumble" read as "R u m b l e".
+    /// The web view drops it where the two glyphs touch on one line (`joinsAcrossUndrawnWhitespace`
+    /// in `text-spacing.js`); without a layout, this compares where each element is drawn from: the
+    /// next glyph must start after the previous one, within a glyph's width, on the same line.
+    ///
+    /// Like the web view, only pieces of at most two characters are joined, and a space drawn as
+    /// its own `<text>` keeps the words apart.
+    static func joiningSVGGlyphs(in content: String) -> String {
+        guard content.range(of: "<svg", options: .caseInsensitive) != nil else {
+            return content
+        }
+        let source = content as NSString
+        var result = ""
+        var location = 0
+        for svg in svgRegex.matches(in: content, range: NSRange(location: 0, length: source.length)) {
+            result += source.substring(with: NSRange(location: location, length: svg.range.location - location))
+            result += joiningGlyphs(inSVG: source.substring(with: svg.range))
+            location = NSMaxRange(svg.range)
+        }
+        result += source.substring(from: location)
+        return result
+    }
+
+    private static func joiningGlyphs(inSVG svg: String) -> String {
+        let source = svg as NSString
+        let texts = textRegex.matches(in: svg, range: NSRange(location: 0, length: source.length))
+        guard texts.count > 1 else {
+            return svg
+        }
+        var result = source.substring(to: texts[0].range.location)
+        for (index, text) in texts.enumerated() {
+            result += source.substring(with: text.range)
+            let end = NSMaxRange(text.range)
+            let gapEnd = index + 1 < texts.count ? texts[index + 1].range.location : source.length
+            let gap = source.substring(with: NSRange(location: end, length: gapEnd - end))
+            if index + 1 < texts.count,
+               !gap.isEmpty, gap.allSatisfy(\.isWhitespace),
+               let previous = Glyph(text, in: source), let next = Glyph(texts[index + 1], in: source),
+               next.continuesWord(of: previous)
+            {
+                continue
+            }
+            result += gap
+        }
+        return result
+    }
+
+    /// An SVG `<text>` element holding one or two characters, and where it is drawn from.
+    private struct Glyph {
+        let x: Double
+        let y: Double
+        let fontSize: Double
+
+        init?(_ match: NSTextCheckingResult, in source: NSString) {
+            let attributes = source.substring(with: match.range(at: 1))
+            let content = source.substring(with: match.range(at: 2))
+                .replacingOccurrences(of: "<[^>]*>", with: "", options: .regularExpression)
+                .replacingOccurrences(of: "&[#A-Za-z0-9]+;", with: "x", options: .regularExpression)
+            guard
+                (1...2).contains(content.count),
+                content.first?.isWhitespace == false, content.last?.isWhitespace == false,
+                let fontSize = Self.number(in: attributes, pattern: #"font-size\s*[=:]\s*"?\s*(-?[0-9.]+)"#),
+                fontSize > 0,
+                let origin = Self.origin(in: attributes)
+            else {
+                return nil
+            }
+            self.x = origin.x
+            self.y = origin.y
+            self.fontSize = fontSize
+        }
+
+        /// Whether this glyph is drawn right after `previous`, on its line.
+        func continuesWord(of previous: Glyph) -> Bool {
+            let advance = x - previous.x
+            return advance > 0
+                && advance <= previous.fontSize * 1.2
+                && abs(y - previous.y) <= previous.fontSize * 0.5
+        }
+
+        private static func origin(in attributes: String) -> (x: Double, y: Double)? {
+            let value = "(-?[0-9.]+(?:e-?[0-9]+)?)"
+            let separator = #"[\s,]+"#
+            if let values = numbers(in: attributes, pattern: #"transform\s*=\s*"\s*matrix\(\s*"# + Array(repeating: value, count: 6).joined(separator: separator)),
+               values.count == 6
+            {
+                return (values[4], values[5])
+            }
+            if let values = numbers(in: attributes, pattern: #"transform\s*=\s*"\s*translate\(\s*"# + value + "(?:" + separator + value + ")?"),
+               let x = values.first
+            {
+                return (x, values.count > 1 ? values[1] : 0)
+            }
+            if let x = number(in: attributes, pattern: #"\bx\s*=\s*"\s*(-?[0-9.]+)"#),
+               let y = number(in: attributes, pattern: #"\by\s*=\s*"\s*(-?[0-9.]+)"#)
+            {
+                return (x, y)
+            }
+            return nil
+        }
+
+        private static func number(in attributes: String, pattern: String) -> Double? {
+            numbers(in: attributes, pattern: pattern)?.first
+        }
+
+        private static func numbers(in attributes: String, pattern: String) -> [Double]? {
+            guard
+                let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
+                let match = regex.firstMatch(in: attributes, range: NSRange(location: 0, length: (attributes as NSString).length))
+            else {
+                return nil
+            }
+            return (1 ..< match.numberOfRanges).compactMap { index in
+                let range = match.range(at: index)
+                return range.location == NSNotFound ? nil : Double((attributes as NSString).substring(with: range))
+            }
+        }
+    }
+
+    private static let svgRegex = try! NSRegularExpression(pattern: #"<svg\b[^>]*>.*?</svg>"#, options: [.caseInsensitive, .dotMatchesLineSeparators])
+    private static let textRegex = try! NSRegularExpression(pattern: #"<text\b([^>]*)>(.*?)</text>"#, options: [.caseInsensitive, .dotMatchesLineSeparators])
 }
