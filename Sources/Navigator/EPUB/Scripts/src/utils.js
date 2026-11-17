@@ -17,6 +17,7 @@ import {
   rangeBoundingRect,
   toNativeRect,
 } from "./rect";
+import { wordSpans } from "./word-spans";
 
 /**
  * Least Recently Used Cache with a limit wraping a Map object
@@ -1184,29 +1185,24 @@ export function getFirstVisibleWordText() {
 
   let documentNode;
   while ((documentNode = nodeIterator.nextNode())) {
-    const words = documentNode.nodeValue.trim().split(/\s+/);
-    if (words.length > 0) {
-      // Loop through each word to find the first visible word within the viewport
-      for (let i = 0; i < words.length; i++) {
-        const wordIndex = documentNode.nodeValue.indexOf(words[i]);
+    // Loop through each word to find the first visible word within the viewport.
+    // Each word is measured where it is (RR-9654), not where it first appears.
+    for (const { word, start, end } of wordSpans(documentNode.nodeValue)) {
+      const wordRange = document.createRange();
+      wordRange.setStart(documentNode, start);
+      wordRange.setEnd(documentNode, end);
 
-        // Create a range for each word
-        const wordRange = document.createRange();
-        wordRange.setStart(documentNode, wordIndex);
-        wordRange.setEnd(documentNode, wordIndex + words[i].length);
+      const wordRect = wordRange.getBoundingClientRect();
 
-        const wordRect = wordRange.getBoundingClientRect();
-
-        // Check if the word is within the current viewport
-        if (
-          wordRect.right > 0 &&
-          wordRect.left < window.innerWidth &&
-          wordRect.bottom > 0 &&
-          wordRect.top < window.innerHeight
-        ) {
-          // Return the locator for the first visible word
-          return { text: getTextFrom(words[i], wordRange) };
-        }
+      // Check if the word is within the current viewport
+      if (
+        wordRect.right > 0 &&
+        wordRect.left < window.innerWidth &&
+        wordRect.bottom > 0 &&
+        wordRect.top < window.innerHeight
+      ) {
+        // Return the locator for the first visible word
+        return { text: getTextFrom(word, wordRange) };
       }
     }
   }
@@ -1245,25 +1241,22 @@ export function getFirstVisibleWordTextOnSide(side) {
 
   let documentNode;
   while ((documentNode = nodeIterator.nextNode())) {
-    const words = documentNode.nodeValue.trim().split(/\s+/);
-    if (words.length > 0) {
-      for (let i = 0; i < words.length; i++) {
-        const wordIndex = documentNode.nodeValue.indexOf(words[i]);
-        const wordRange = document.createRange();
-        wordRange.setStart(documentNode, wordIndex);
-        wordRange.setEnd(documentNode, wordIndex + words[i].length);
+    // Each word is measured where it is (RR-9654), not where it first appears.
+    for (const { word, start, end } of wordSpans(documentNode.nodeValue)) {
+      const wordRange = document.createRange();
+      wordRange.setStart(documentNode, start);
+      wordRange.setEnd(documentNode, end);
 
-        const wordRect = wordRange.getBoundingClientRect();
-        const wordCenter = (wordRect.left + wordRect.right) / 2;
+      const wordRect = wordRange.getBoundingClientRect();
+      const wordCenter = (wordRect.left + wordRect.right) / 2;
 
-        if (
-          wordCenter >= minX &&
-          wordCenter < maxX &&
-          wordRect.bottom > 0 &&
-          wordRect.top < window.innerHeight
-        ) {
-          return { text: getTextFrom(words[i], wordRange) };
-        }
+      if (
+        wordCenter >= minX &&
+        wordCenter < maxX &&
+        wordRect.bottom > 0 &&
+        wordRect.top < window.innerHeight
+      ) {
+        return { text: getTextFrom(word, wordRange) };
       }
     }
   }
@@ -1307,29 +1300,26 @@ export function getLastVisibleWordText() {
 
   for (let i = textNodes.length - 1; i >= 0; i--) {
     const documentNode = textNodes[i];
-    const words = documentNode.nodeValue.trim().split(/\s+/);
-    if (words.length > 0) {
-      // Loop through each word in reverse to find the last visible word within the viewport
-      for (let j = words.length - 1; j >= 0; j--) {
-        const wordIndex = documentNode.nodeValue.lastIndexOf(words[j]);
+    // Loop through each word in reverse to find the last visible word within the viewport.
+    // Each word is measured where it is (RR-9654), not where it last appears.
+    const spans = wordSpans(documentNode.nodeValue);
+    for (let j = spans.length - 1; j >= 0; j--) {
+      const { word, start, end } = spans[j];
+      const wordRange = document.createRange();
+      wordRange.setStart(documentNode, start);
+      wordRange.setEnd(documentNode, end);
 
-        // Create a range for each word
-        const wordRange = document.createRange();
-        wordRange.setStart(documentNode, wordIndex);
-        wordRange.setEnd(documentNode, wordIndex + words[j].length);
+      const wordRect = wordRange.getBoundingClientRect();
 
-        const wordRect = wordRange.getBoundingClientRect();
-
-        // Check if the word is within the current viewport
-        if (
-          wordRect.right > 0 &&
-          wordRect.left < window.innerWidth &&
-          wordRect.bottom > 0 &&
-          wordRect.top < window.innerHeight
-        ) {
-          // Return the locator for the last visible word
-          return { text: getTextFrom(words[j], wordRange) };
-        }
+      // Check if the word is within the current viewport
+      if (
+        wordRect.right > 0 &&
+        wordRect.left < window.innerWidth &&
+        wordRect.bottom > 0 &&
+        wordRect.top < window.innerHeight
+      ) {
+        // Return the locator for the last visible word
+        return { text: getTextFrom(word, wordRange) };
       }
     }
   }
