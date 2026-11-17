@@ -25,7 +25,10 @@ import {
   pageNumberIsolation,
 } from "./page-number";
 import { keepsNewlines } from "./line-breaks";
-import { needsSpaceBetween } from "./text-spacing";
+import {
+  joinsAcrossUndrawnWhitespace,
+  needsSpaceBetween,
+} from "./text-spacing";
 
 // Polyfill for iOS 13.3
 import { ResizeObserver as ResizeObserverPolyfill } from "@juggle/resize-observer";
@@ -171,7 +174,8 @@ function processSpansForTextSpacing() {
     "$1\n<$2"
   );
 
-  insertSpacesBetweenTextFragments();
+  const joined = joinGlyphsAcrossUndrawnWhitespace();
+  insertSpacesBetweenTextFragments(joined);
 }
 
 /**
@@ -199,15 +203,151 @@ function separateLineBreaks() {
   });
 }
 
+const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
+
+// The SVG elements that draw the text they contain. SVG draws no other text,
+// whitespace included.
+const SVG_TEXT_ELEMENTS = ["text", "tspan", "textPath"];
+
+/**
+ * Removes the whitespace that splits a word drawn one glyph at a time, e.g.
+ * the newline between the SVG <text> elements of a curved title, or between
+ * the <p> elements of a bouncing word (RR-6140). The page draws none of it,
+ * but `textContent` keeps it, so "Rumble" read as "R u m b l e". The decision
+ * lives in text-spacing.js, which is covered by tests.
+ *
+ * Never touches the newline of a <br>, nor whitespace that is drawn or kept as
+ * a line break, nor OCR overlays, where each element holds a whole word.
+ * Everything is measured before the first removal, so the page is laid out
+ * once; whitespace that is not drawn does not move anything when it goes.
+ *
+ * Returns the text nodes that now follow the glyph they were joined to, which
+ * `insertSpacesBetweenTextFragments` must leave joined: it would split glyphs
+ * tilted different ways (a bouncing word's "n" and "c").
+ */
+function joinGlyphsAcrossUndrawnWhitespace() {
+  const nodes = textNodes().filter((node) => node.nodeValue.length > 0);
+  const transforms = new Map();
+  const removable = [];
+  const joined = new Set();
+  for (let index = 1; index + 1 < nodes.length; index++) {
+    const node = nodes[index];
+    const previous = nodes[index - 1];
+    const next = nodes[index + 1];
+    if (
+      !isUndrawnWhitespace(node) ||
+      isWhitespace(previous) ||
+      isWhitespace(next) ||
+      isOCRWord(previous) ||
+      isOCRWord(next)
+    ) {
+      continue;
+    }
+    if (
+      joinsAcrossUndrawnWhitespace(
+        {
+          text: previous.nodeValue,
+          rect: characterRect(previous, previous.nodeValue.length - 1),
+          ...drawnTransform(previous.parentElement, transforms),
+        },
+        {
+          text: next.nodeValue,
+          rect: characterRect(next, 0),
+          ...drawnTransform(next.parentElement, transforms),
+        }
+      )
+    ) {
+      removable.push(node);
+      joined.add(next);
+    }
+  }
+  removable.forEach((node) => node.remove());
+  return joined;
+}
+
+function textNodes() {
+  const walker = document.createTreeWalker(
+    document.body,
+    NodeFilter.SHOW_TEXT,
+    {
+      acceptNode: (node) =>
+        node.parentElement && node.parentElement.closest("script, style")
+          ? NodeFilter.FILTER_REJECT
+          : NodeFilter.FILTER_ACCEPT,
+    }
+  );
+  const nodes = [];
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    nodes.push(node);
+  }
+  return nodes;
+}
+
+function isWhitespace(node) {
+  return !/\S/.test(node.nodeValue);
+}
+
+/**
+ * Whether the text `node` is only whitespace, which the page does not draw and
+ * which is not the newline of a <br>.
+ */
+function isUndrawnWhitespace(node) {
+  const parent = node.parentElement;
+  if (!parent || !isWhitespace(node)) {
+    return false;
+  }
+  if (isLineBreak(node.previousSibling) || isLineBreak(node.nextSibling)) {
+    return false;
+  }
+  if (isOutsideSVGText(parent)) {
+    return true;
+  }
+  if (keepsNewlines(getComputedStyle(parent))) {
+    return false;
+  }
+  const range = document.createRange();
+  range.selectNodeContents(node);
+  for (const rect of range.getClientRects()) {
+    if (rect.width > 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isLineBreak(node) {
+  return !!node && node.nodeName.toLowerCase() === "br";
+}
+
+/**
+ * Whether `element` is an SVG element whose own text SVG never draws.
+ */
+function isOutsideSVGText(element) {
+  return (
+    element.namespaceURI === SVG_NAMESPACE &&
+    !SVG_TEXT_ELEMENTS.includes(element.localName)
+  );
+}
+
+/**
+ * Whether the text `node` is in an OCR overlay, where every element holds one
+ * whole word (Rally's OCR tool lays out `.text-overlay` elements in an
+ * `.ocr-container`).
+ */
+function isOCRWord(node) {
+  return !!node.parentElement && !!node.parentElement.closest(".text-overlay");
+}
+
 /**
  * Inserts a space wherever two pieces of text touch in the DOM but are drawn
  * apart on the page, e.g. the line fragments of a PDF-converted fixed layout.
  * The decision lives in text-spacing.js, which is covered by tests.
  *
  * Everything is measured before the first insertion, so the page is laid out
- * once instead of once per inserted space.
+ * once instead of once per inserted space. The text nodes in `joined` stay
+ * attached to the glyph before them (`joinGlyphsAcrossUndrawnWhitespace`).
  */
-function insertSpacesBetweenTextFragments() {
+function insertSpacesBetweenTextFragments(joined = new Set()) {
   const walker = document.createTreeWalker(
     document.body,
     NodeFilter.SHOW_TEXT,
@@ -228,6 +368,7 @@ function insertSpacesBetweenTextFragments() {
     }
     if (
       previous &&
+      !joined.has(node) &&
       needsSpaceBetween(
         {
           text: previous.nodeValue,
