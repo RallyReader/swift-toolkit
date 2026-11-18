@@ -240,8 +240,25 @@ class HTMLResourceContentExtractor: ResourceContentExtractor {
     /// Parse the HTML resource with SwiftSoup.
     ///
     /// This may be slow but will recover from broken HTML documents.
+    ///
+    /// Rally (RR-9686): the text is the body's text nodes as they are, like the XML path's and the
+    /// web view's `textContent`. SwiftSoup's `text()` turns every run of whitespace into a space
+    /// (and its un-normalised form adds a space before each block and `<br>`), so the newline of
+    /// a `<br>` or between two paragraphs was a space here and a newline in the page.
     private func parse(html: String) -> String? {
-        try? SwiftSoup.parse(html).body()?.text()
+        guard let body = try? SwiftSoup.parse(html).body() else {
+            return nil
+        }
+        var text = ""
+        var stack: [SwiftSoup.Node] = [body]
+        while let node = stack.popLast() {
+            if let textNode = node as? SwiftSoup.TextNode {
+                text += textNode.getWholeText()
+            } else {
+                stack.append(contentsOf: node.getChildNodes().reversed())
+            }
+        }
+        return text
     }
 }
 
