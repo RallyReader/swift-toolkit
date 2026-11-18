@@ -97,6 +97,21 @@ function onViewportWidthChanged() {
   snapCurrentPosition();
 }
 
+const virtualPageId = "readium-virtual-page";
+const virtualColumnClass = "readium-virtual-column";
+
+/**
+ * Rally: removes the virtual columns `appendVirtualColumnIfNeeded` added and
+ * returns them, in order, so they can be put back at the end of the body.
+ */
+export function detachVirtualColumns() {
+  const columns = Array.from(
+    document.querySelectorAll(`#${virtualPageId}, .${virtualColumnClass}`)
+  );
+  columns.forEach((column) => column.remove());
+  return columns;
+}
+
 /**
  * Having an odd number of columns when displaying two columns per screen causes snapping and page
  * turning issues. To fix this, we insert a blank virtual column at the end of the resource.
@@ -109,11 +124,7 @@ function onViewportWidthChanged() {
  * the count even (Junie B. Jones #24, chapter 2, on a 1080 pt wide spread: 9 columns either way).
  */
 export function appendVirtualColumnIfNeeded() {
-  const id = "readium-virtual-page";
-  const className = "readium-virtual-column";
-  document
-    .querySelectorAll(`#${id}, .${className}`)
-    .forEach((column) => column.remove());
+  detachVirtualColumns();
   if (isScrollModeEnabled() || getColumnCountPerScreen() != 2) {
     return;
   }
@@ -128,9 +139,9 @@ export function appendVirtualColumnIfNeeded() {
   for (var i = 0; i < 2 && hasOddColCount(); i++) {
     var virtualCol = document.createElement("div");
     if (i == 0) {
-      virtualCol.setAttribute("id", id);
+      virtualCol.setAttribute("id", virtualPageId);
     }
-    virtualCol.classList.add(className);
+    virtualCol.classList.add(virtualColumnClass);
     virtualCol.style.breakBefore = "column";
     virtualCol.innerHTML = "&#8203;"; // zero-width space
     document.body.appendChild(virtualCol);

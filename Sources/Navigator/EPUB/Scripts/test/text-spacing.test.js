@@ -321,6 +321,58 @@ describe("glyphs split by whitespace the page does not draw (RR-6140)", () => {
   });
 });
 
+describe("the navigator's virtual columns (utils.js)", () => {
+  // The end of 9780061858109 chapter 5 (an XHTML page: no whitespace after
+  // the last </div> in the body).
+  const chapterEnd =
+    '<div class="chapter"><div class="body"><p>“Then what are we waiting for?” said Zeke.</p>\n</div></div>';
+
+  // As `appendVirtualColumnIfNeeded` adds one on a two-column screen with an
+  // odd column count. jsdom lays nothing out, so it is added by hand.
+  function appendVirtualColumn() {
+    const column = document.createElement("div");
+    column.setAttribute("id", "readium-virtual-page");
+    column.classList.add("readium-virtual-column");
+    column.style.breakBefore = "column";
+    column.innerHTML = "&#8203;";
+    document.body.appendChild(column);
+  }
+
+  test("the text is the same whether the column was added before or after the text preparation", () => {
+    document.body.innerHTML = chapterEnd;
+    require("../src/decorator").registerTemplates({});
+    appendVirtualColumn();
+    const columnAfter = document.body.textContent;
+
+    document.body.innerHTML = chapterEnd;
+    appendVirtualColumn();
+    require("../src/decorator").registerTemplates({});
+    const columnBefore = document.body.textContent;
+
+    // It used to end in "\n\n\u200B" when the column was already there: the
+    // <div>/<p> rewrite put a newline before it (the iPad golden's flake).
+    expect(columnBefore).toBe(columnAfter);
+    expect(columnBefore.endsWith("said Zeke.\n\u200B")).toBe(true);
+  });
+
+  test("the columns stay at the end of the body, in order", () => {
+    document.body.innerHTML = "<p>one</p><p>two</p>";
+    appendVirtualColumn();
+    const second = document.createElement("div");
+    second.classList.add("readium-virtual-column");
+    second.innerHTML = "&#8203;";
+    document.body.appendChild(second);
+
+    require("../src/decorator").registerTemplates({});
+
+    const columns = document.querySelectorAll(".readium-virtual-column");
+    expect(columns.length).toBe(2);
+    expect(columns[0].id).toBe("readium-virtual-page");
+    expect(document.body.lastElementChild).toBe(columns[1]);
+    expect(document.body.textContent).toBe("one\ntwo\u200B\u200B");
+  });
+});
+
 describe("getHtmlBodyTextContent", () => {
   test("returns the body text after the rewrite", () => {
     const text = registerTemplates("<p>one<br/>two</p><p>ﬁve</p>");
