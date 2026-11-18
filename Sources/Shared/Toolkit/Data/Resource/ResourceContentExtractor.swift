@@ -54,7 +54,7 @@ class HTMLResourceContentExtractor: ResourceContentExtractor {
                     // before parsing. `&`, `<`, `>` and `"` are protected through the parsers with placeholders (a raw
                     // `&` or `<` is no longer valid XML: the page fell back to SwiftSoup, which read `<` as markup,
                     // RR-9683); line breaks
-                    // and paragraph/div boundaries become new lines; the "ff" ligature is spelled out.
+                    // and paragraph/div boundaries become new lines; ligatures are spelled out (`expandingLigatures`).
                     // Every `<br>` (`<br/>`, `<br />`, with attributes) gets exactly one new line, like
                     // `separateLineBreaks` in decorator.js gives it in the web view. A word drawn one glyph per
                     // SVG `<text>` loses the newlines between them, like `joinGlyphsAcrossUndrawnWhitespace`.
@@ -66,7 +66,6 @@ class HTMLResourceContentExtractor: ResourceContentExtractor {
                         .replacingOccurrences(of: "&(?:lt|#0*60|#[xX]0*3[cC]);", with: "rallylessthan", options: .regularExpression)
                         .replacingOccurrences(of: "&(?:gt|#0*62|#[xX]0*3[eE]);", with: "rallygreaterthan", options: .regularExpression)
                         .replacingOccurrences(of: "&quot;", with: "rallyquote")
-                        .replacingOccurrences(of: "\u{FB00}", with: "ff")
                     )
 
                     // First try to parse a valid XML document, then fallback on SwiftSoup, which is slower.
@@ -75,7 +74,7 @@ class HTMLResourceContentExtractor: ResourceContentExtractor {
                         ?? ""
 
                     return .success(
-                        text
+                        Self.expandingLigatures(in: text)
                             .replacingOccurrences(of: "ampToand", with: "&")
                             .replacingOccurrences(of: "rallylessthan", with: "<")
                             .replacingOccurrences(of: "rallygreaterthan", with: ">")
@@ -243,6 +242,43 @@ class HTMLResourceContentExtractor: ResourceContentExtractor {
     /// This may be slow but will recover from broken HTML documents.
     private func parse(html: String) -> String? {
         try? SwiftSoup.parse(html).body()?.text()
+    }
+}
+
+// MARK: - Ligatures (Rally, RR-9684)
+
+extension HTMLResourceContentExtractor {
+    /// The ligature characters the web view spells out, and their letters. Keep it the same as
+    /// `ligatureMap` in `processSpansForTextSpacing` (decorator.js): a ligature spelled out in only
+    /// one of the two texts moves every word after it by a character or two.
+    static let ligatures: [Unicode.Scalar: String] = [
+        "\u{FB00}": "ff",
+        "\u{FB01}": "fi",
+        "\u{FB02}": "fl",
+        "\u{FB03}": "ffi",
+        "\u{FB04}": "ffl",
+        "\u{FB05}": "st",
+        "\u{FB06}": "st",
+        "\u{0132}": "IJ",
+        "\u{0133}": "ij",
+        "\u{0152}": "OE",
+        "\u{0153}": "oe",
+    ]
+
+    /// Spells out the ligature characters of `text`, as the web view does in its own text.
+    static func expandingLigatures(in text: String) -> String {
+        guard text.unicodeScalars.contains(where: { ligatures[$0] != nil }) else {
+            return text
+        }
+        var result = String.UnicodeScalarView()
+        for scalar in text.unicodeScalars {
+            if let letters = ligatures[scalar] {
+                result.append(contentsOf: letters.unicodeScalars)
+            } else {
+                result.append(scalar)
+            }
+        }
+        return String(result)
     }
 }
 

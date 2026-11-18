@@ -165,6 +165,8 @@ function processSpansForTextSpacing() {
   );
 
   // Create a mapping of Unicode ligatures to their regular character equivalents
+  // Keep it the same as `ligatures` in the Swift text extractor
+  // (ResourceContentExtractor.swift, RR-9684).
   const ligatureMap = {
     "\uFB00": "ff", // ﬀ -> ff
     "\uFB01": "fi", // ﬁ -> fi
