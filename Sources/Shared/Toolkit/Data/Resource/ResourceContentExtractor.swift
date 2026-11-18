@@ -102,15 +102,15 @@ class HTMLResourceContentExtractor: ResourceContentExtractor {
         }
 
         // Rally: only fixed-layout pages with absolutely positioned elements can
-        // have page numbers glued to the text.
+        // have page numbers or lines glued to the text.
         guard xml.contains("left:") || xml.contains("right:") else {
             return body.stringValue
         }
 
-        return textSeparatingPageNumbers(of: body)
+        return textSeparatingPositionedFragments(of: body)
     }
 
-    // MARK: - Page numbers in positioned layouts (Rally)
+    // MARK: - Page numbers and lines in positioned layouts (Rally)
 
     /// Fixed-layout pages converted from PDFs place every line in an
     /// absolutely positioned element, without whitespace between them. A page
@@ -124,7 +124,15 @@ class HTMLResourceContentExtractor: ResourceContentExtractor {
     /// its neighbor is on a different line. Subscripts (CO2) and numbers
     /// inside the text are left untouched. `decorator.js` inserts a space
     /// between these elements in the DOM as well.
-    private func textSeparatingPageNumbers(of body: ReadiumFuzi.XMLElement) -> String {
+    ///
+    /// The lines themselves are glued the same way ("the ocean." + "Meet them." read "ocean.Meet",
+    /// RR-9687), and `decorator.js` adds a space wherever two pieces of text are drawn apart
+    /// (`insertSpacesBetweenTextFragments`). Without a layout, a positioned element starts a new
+    /// line when it is at another height than the positioned element right before it and does not
+    /// start further along the line (`Position.startsNewLine`): a subscript, or the rest of a line
+    /// after it, starts further along and stays glued. Like the script, no space is added where
+    /// the text already has whitespace.
+    private func textSeparatingPositionedFragments(of body: ReadiumFuzi.XMLElement) -> String {
         let candidates = body.xpath(".//*[@style and normalize-space(.) != '' and translate(normalize-space(.), '0123456789', '') = '']")
 
         var spaceBefore: [ReadiumFuzi.XMLElement] = []
@@ -162,8 +170,25 @@ class HTMLResourceContentExtractor: ResourceContentExtractor {
             }
         }
 
+        var lineStarts: [ReadiumFuzi.XMLElement] = []
+        for element in body.xpath(".//*[@style]") {
+            guard
+                let position = Position(element),
+                let previous = element.previousSibling,
+                let previousPosition = Position(previous),
+                position.startsNewLine(after: previousPosition),
+                !spaceBefore.contains(where: { $0 == element }),
+                !spaceAfter.contains(where: { $0 == previous }),
+                let lastCharacter = previous.stringValue.last, !lastCharacter.isWhitespace,
+                let firstCharacter = element.stringValue.first, !firstCharacter.isWhitespace
+            else {
+                continue
+            }
+            lineStarts.append(element)
+        }
+
         let originalText = body.stringValue
-        guard !spaceBefore.isEmpty || !spaceAfter.isEmpty else {
+        guard !spaceBefore.isEmpty || !spaceAfter.isEmpty || !lineStarts.isEmpty else {
             return originalText
         }
 
@@ -176,7 +201,7 @@ class HTMLResourceContentExtractor: ResourceContentExtractor {
                 textWithoutSpaces += node.stringValue
                 return
             }
-            if spaceBefore.contains(where: { $0 == element }) {
+            if spaceBefore.contains(where: { $0 == element }) || lineStarts.contains(where: { $0 == element }) {
                 text += " "
             }
             element.childNodes(ofTypes: [.Element, .Text, .CDataSection, .EntityRef]).forEach(append)
@@ -195,6 +220,8 @@ class HTMLResourceContentExtractor: ResourceContentExtractor {
         let verticalProperty: String
         let unit: String
         let vertical: Double
+        /// Where the element starts along the line, when it is positioned from the left.
+        let left: (value: Double, unit: String)?
 
         private static let regex = try! NSRegularExpression(pattern: "(?:^|;)\\s*(left|right|top|bottom)\\s*:\\s*(-?[0-9.]+)\\s*(px|pt|em|%)?", options: .caseInsensitive)
 
@@ -218,6 +245,7 @@ class HTMLResourceContentExtractor: ResourceContentExtractor {
             guard values["left"] != nil || values["right"] != nil else {
                 return nil
             }
+            left = values["left"]
             if let bottom = values["bottom"] {
                 verticalProperty = "bottom"
                 vertical = bottom.value
@@ -233,6 +261,18 @@ class HTMLResourceContentExtractor: ResourceContentExtractor {
 
         func isComparable(with other: Position) -> Bool {
             verticalProperty == other.verticalProperty && unit == other.unit
+        }
+
+        /// Whether an element at this position, right after one at `previous` in the DOM, starts
+        /// a new line: it is at another height and does not start further along the line.
+        func startsNewLine(after previous: Position) -> Bool {
+            guard
+                isComparable(with: previous), vertical != previous.vertical,
+                let left = left, let previousLeft = previous.left, left.unit == previousLeft.unit
+            else {
+                return false
+            }
+            return left.value <= previousLeft.value
         }
     }
 
