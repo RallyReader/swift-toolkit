@@ -12,12 +12,9 @@ import {
   getCurrentSelectionLazy,
   getTextFrom,
 } from "./selection";
-import {
-  getClientRectsNoOverlap,
-  rangeBoundingRect,
-  toNativeRect,
-} from "./rect";
+import { getClientRectsNoOverlap, toNativeRect } from "./rect";
 import { wordSpans } from "./word-spans";
+import { displayTypeRect, wordRect } from "./display-type";
 
 /**
  * Least Recently Used Cache with a limit wraping a Map object
@@ -316,7 +313,8 @@ export function rectFromLocator(locator) {
     return toNativeRect(ocrRect);
   }
 
-  return toNativeRect(rangeBoundingRect(range));
+  // Rally (RR-9369): a word in display type is where its ink is.
+  return toNativeRect(wordRect(range));
 }
 
 /**
@@ -649,9 +647,9 @@ export function clientRectFromLocator(locator, reset, cache) {
     // Use OCR-corrected rect
     rect = ocrRect;
   } else {
-    // Use standard rect calculation
-    const clientRects = getClientRectsNoOverlap(range, true);
-    rect = clientRects[0];
+    // Use standard rect calculation. Rally (RR-9369): a word in display type
+    // is where its ink is, not its font's box (word help points at it).
+    rect = displayTypeRect(range) || getClientRectsNoOverlap(range, true)[0];
   }
 
   nativeRect = toNativeRect(rect);
