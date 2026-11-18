@@ -30,6 +30,7 @@ import {
   joinsAcrossUndrawnWhitespace,
   needsSpaceBetween,
 } from "./text-spacing";
+import { displayTypeRect, wordRect } from "./display-type";
 
 // Polyfill for iOS 13.3
 import { ResizeObserver as ResizeObserverPolyfill } from "@juggle/resize-observer";
@@ -665,7 +666,7 @@ export function handleDecorationClickEvent(event, clickEvent) {
   webkit.messageHandlers.decorationActivated.postMessage({
     id: target.item.decoration.id,
     group: target.group,
-    rect: toNativeRect(rangeBoundingRect(target.item.range)),
+    rect: toNativeRect(wordRect(target.item.range)),
     click: clickEvent,
   });
   return true;
@@ -951,7 +952,9 @@ export function DecorationGroup(groupId, groupName) {
       }
     }
 
-    let boundingRect = rangeBoundingRect(item.range);
+    // Rally (RR-9369): a word in display type is decorated on its ink.
+    const displayRect = displayTypeRect(item.range);
+    let boundingRect = displayRect || rangeBoundingRect(item.range);
 
     let elementTemplate;
     try {
@@ -972,9 +975,13 @@ export function DecorationGroup(groupId, groupName) {
       // Decorated text may have a different writingMode from document body
       const decoratorWritingMode = getComputedStyle(startElement).writingMode;
 
-      const clientRects = getClientRectsNoOverlap(
-        item.range,
-        doNotMergeHorizontallyAlignedRects
+      const clientRects = (
+        displayRect
+          ? [displayRect]
+          : getClientRectsNoOverlap(
+              item.range,
+              doNotMergeHorizontallyAlignedRects
+            )
       ).sort((r1, r2) => {
         if (r1.top !== r2.top) return r1.top - r2.top;
         if (decoratorWritingMode === "vertical-rl") {
@@ -1269,6 +1276,13 @@ export function DecorationGroup(groupId, groupName) {
       log("No OCR layout detected for this range.");
     }
 
+    // Rally (RR-9369): a word in display type is decorated on its ink. An OCR
+    // overlay's box is the word's already.
+    const displayRect = ocrRect ? null : displayTypeRect(item.range);
+    if (displayRect) {
+      boundingRect = displayRect;
+    }
+
     // Position the decoration element inside the page container
     function positionElement(
       element,
@@ -1434,10 +1448,12 @@ export function DecorationGroup(groupId, groupName) {
     try {
       if (style.layout === "boxes") {
         let doNotMergeHorizontallyAlignedRects = true;
-        let clientRects = getClientRectsNoOverlap(
-          item.range,
-          doNotMergeHorizontallyAlignedRects
-        );
+        let clientRects = displayRect
+          ? [displayRect]
+          : getClientRectsNoOverlap(
+              item.range,
+              doNotMergeHorizontallyAlignedRects
+            );
 
         clientRects = clientRects.sort((r1, r2) => {
           if (r1.top < r2.top) {
