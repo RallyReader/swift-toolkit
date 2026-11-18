@@ -128,11 +128,22 @@ export function registerTemplates(newStyles) {
   // );
 }
 
+/** The bodies whose text `processSpansForTextSpacing` has prepared. */
+const preparedBodies = new WeakSet();
+
 /**
  * Processes spans in the document to ensure proper spacing between text segments.
  * This prevents words from being incorrectly stitched together when extracting text.
  */
 function processSpansForTextSpacing() {
+  // Once per page (RR-9685): a second pass gave every <br> a second newline,
+  // moving each word after it one character further than in the text the app
+  // extracts. The body element stays the same through the rewrites below.
+  if (preparedBodies.has(document.body)) {
+    return;
+  }
+  preparedBodies.add(document.body);
+
   // Rally: the virtual columns (utils.js) are the navigator's, not the
   // book's. They are appended once the page has been laid out, which may be
   // before or after this runs, so they sit out the text preparation: the
@@ -171,6 +182,8 @@ function prepareTextForSpacing() {
   );
 
   // Create a mapping of Unicode ligatures to their regular character equivalents
+  // Keep it the same as `ligatures` in the Swift text extractor
+  // (ResourceContentExtractor.swift, RR-9684).
   const ligatureMap = {
     "\uFB00": "ff", // ﬀ -> ff
     "\uFB01": "fi", // ﬁ -> fi

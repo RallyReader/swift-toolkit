@@ -51,8 +51,10 @@ class HTMLResourceContentExtractor: ResourceContentExtractor {
             .asyncFlatMap { content in
                 do {
                     // Rally: Fuzi drops HTML entities (" ' …) when parsing the XML, so the entities are unescaped
-                    // before parsing. `&` and `"` are protected through the parsers with placeholders; line breaks
-                    // and paragraph/div boundaries become new lines; the "ff" ligature is spelled out.
+                    // before parsing. `&`, `<`, `>` and `"` are protected through the parsers with placeholders (a raw
+                    // `&` or `<` is no longer valid XML: the page fell back to SwiftSoup, which read `<` as markup,
+                    // RR-9683); line breaks
+                    // and paragraph/div boundaries become new lines; ligatures are spelled out (`expandingLigatures`).
                     // Every `<br>` (`<br/>`, `<br />`, with attributes) gets exactly one new line, like
                     // `separateLineBreaks` in decorator.js gives it in the web view. A word drawn one glyph per
                     // SVG `<text>` loses the newlines between them, like `joinGlyphsAcrossUndrawnWhitespace`.
@@ -60,10 +62,10 @@ class HTMLResourceContentExtractor: ResourceContentExtractor {
                         .replacingOccurrences(of: #"<br\b[^>]*>"#, with: "$0\n", options: .regularExpression)
                         .replacingOccurrences(of: "/p><p", with: "/p>\n<p")
                         .replacingOccurrences(of: "/div><div", with: "/div>\n<div")
-                        .replacingOccurrences(of: "&amp;", with: "ampToand")
-                        .replacingOccurrences(of: "&#x0026;", with: "ampToand")
+                        .replacingOccurrences(of: "&(?:amp|#0*38|#[xX]0*26);", with: "ampToand", options: .regularExpression)
+                        .replacingOccurrences(of: "&(?:lt|#0*60|#[xX]0*3[cC]);", with: "rallylessthan", options: .regularExpression)
+                        .replacingOccurrences(of: "&(?:gt|#0*62|#[xX]0*3[eE]);", with: "rallygreaterthan", options: .regularExpression)
                         .replacingOccurrences(of: "&quot;", with: "rallyquote")
-                        .replacingOccurrences(of: "\u{FB00}", with: "ff")
                     )
 
                     // First try to parse a valid XML document, then fallback on SwiftSoup, which is slower.
@@ -72,8 +74,10 @@ class HTMLResourceContentExtractor: ResourceContentExtractor {
                         ?? ""
 
                     return .success(
-                        text
+                        Self.expandingLigatures(in: text)
                             .replacingOccurrences(of: "ampToand", with: "&")
+                            .replacingOccurrences(of: "rallylessthan", with: "<")
+                            .replacingOccurrences(of: "rallygreaterthan", with: ">")
                             .replacingOccurrences(of: "rallyquote", with: "\"")
                     )
 
@@ -98,15 +102,15 @@ class HTMLResourceContentExtractor: ResourceContentExtractor {
         }
 
         // Rally: only fixed-layout pages with absolutely positioned elements can
-        // have page numbers glued to the text.
+        // have page numbers or lines glued to the text.
         guard xml.contains("left:") || xml.contains("right:") else {
             return body.stringValue
         }
 
-        return textSeparatingPageNumbers(of: body)
+        return textSeparatingPositionedFragments(of: body)
     }
 
-    // MARK: - Page numbers in positioned layouts (Rally)
+    // MARK: - Page numbers and lines in positioned layouts (Rally)
 
     /// Fixed-layout pages converted from PDFs place every line in an
     /// absolutely positioned element, without whitespace between them. A page
@@ -120,7 +124,15 @@ class HTMLResourceContentExtractor: ResourceContentExtractor {
     /// its neighbor is on a different line. Subscripts (CO2) and numbers
     /// inside the text are left untouched. `decorator.js` inserts a space
     /// between these elements in the DOM as well.
-    private func textSeparatingPageNumbers(of body: ReadiumFuzi.XMLElement) -> String {
+    ///
+    /// The lines themselves are glued the same way ("the ocean." + "Meet them." read "ocean.Meet",
+    /// RR-9687), and `decorator.js` adds a space wherever two pieces of text are drawn apart
+    /// (`insertSpacesBetweenTextFragments`). Without a layout, a positioned element starts a new
+    /// line when it is at another height than the positioned element right before it and does not
+    /// start further along the line (`Position.startsNewLine`): a subscript, or the rest of a line
+    /// after it, starts further along and stays glued. Like the script, no space is added where
+    /// the text already has whitespace.
+    private func textSeparatingPositionedFragments(of body: ReadiumFuzi.XMLElement) -> String {
         let candidates = body.xpath(".//*[@style and normalize-space(.) != '' and translate(normalize-space(.), '0123456789', '') = '']")
 
         var spaceBefore: [ReadiumFuzi.XMLElement] = []
@@ -158,8 +170,25 @@ class HTMLResourceContentExtractor: ResourceContentExtractor {
             }
         }
 
+        var lineStarts: [ReadiumFuzi.XMLElement] = []
+        for element in body.xpath(".//*[@style]") {
+            guard
+                let position = Position(element),
+                let previous = element.previousSibling,
+                let previousPosition = Position(previous),
+                position.startsNewLine(after: previousPosition),
+                !spaceBefore.contains(where: { $0 == element }),
+                !spaceAfter.contains(where: { $0 == previous }),
+                let lastCharacter = previous.stringValue.last, !lastCharacter.isWhitespace,
+                let firstCharacter = element.stringValue.first, !firstCharacter.isWhitespace
+            else {
+                continue
+            }
+            lineStarts.append(element)
+        }
+
         let originalText = body.stringValue
-        guard !spaceBefore.isEmpty || !spaceAfter.isEmpty else {
+        guard !spaceBefore.isEmpty || !spaceAfter.isEmpty || !lineStarts.isEmpty else {
             return originalText
         }
 
@@ -172,7 +201,7 @@ class HTMLResourceContentExtractor: ResourceContentExtractor {
                 textWithoutSpaces += node.stringValue
                 return
             }
-            if spaceBefore.contains(where: { $0 == element }) {
+            if spaceBefore.contains(where: { $0 == element }) || lineStarts.contains(where: { $0 == element }) {
                 text += " "
             }
             element.childNodes(ofTypes: [.Element, .Text, .CDataSection, .EntityRef]).forEach(append)
@@ -191,6 +220,8 @@ class HTMLResourceContentExtractor: ResourceContentExtractor {
         let verticalProperty: String
         let unit: String
         let vertical: Double
+        /// Where the element starts along the line, when it is positioned from the left.
+        let left: (value: Double, unit: String)?
 
         private static let regex = try! NSRegularExpression(pattern: "(?:^|;)\\s*(left|right|top|bottom)\\s*:\\s*(-?[0-9.]+)\\s*(px|pt|em|%)?", options: .caseInsensitive)
 
@@ -214,6 +245,7 @@ class HTMLResourceContentExtractor: ResourceContentExtractor {
             guard values["left"] != nil || values["right"] != nil else {
                 return nil
             }
+            left = values["left"]
             if let bottom = values["bottom"] {
                 verticalProperty = "bottom"
                 vertical = bottom.value
@@ -230,14 +262,80 @@ class HTMLResourceContentExtractor: ResourceContentExtractor {
         func isComparable(with other: Position) -> Bool {
             verticalProperty == other.verticalProperty && unit == other.unit
         }
+
+        /// Whether an element at this position, right after one at `previous` in the DOM, starts
+        /// a new line: it is at another height and does not start further along the line.
+        func startsNewLine(after previous: Position) -> Bool {
+            guard
+                isComparable(with: previous), vertical != previous.vertical,
+                let left = left, let previousLeft = previous.left, left.unit == previousLeft.unit
+            else {
+                return false
+            }
+            return left.value <= previousLeft.value
+        }
     }
 
 
     /// Parse the HTML resource with SwiftSoup.
     ///
     /// This may be slow but will recover from broken HTML documents.
+    ///
+    /// Rally (RR-9686): the text is the body's text nodes as they are, like the XML path's and the
+    /// web view's `textContent`. SwiftSoup's `text()` turns every run of whitespace into a space
+    /// (and its un-normalised form adds a space before each block and `<br>`), so the newline of
+    /// a `<br>` or between two paragraphs was a space here and a newline in the page.
     private func parse(html: String) -> String? {
-        try? SwiftSoup.parse(html).body()?.text()
+        guard let body = try? SwiftSoup.parse(html).body() else {
+            return nil
+        }
+        var text = ""
+        var stack: [SwiftSoup.Node] = [body]
+        while let node = stack.popLast() {
+            if let textNode = node as? SwiftSoup.TextNode {
+                text += textNode.getWholeText()
+            } else {
+                stack.append(contentsOf: node.getChildNodes().reversed())
+            }
+        }
+        return text
+    }
+}
+
+// MARK: - Ligatures (Rally, RR-9684)
+
+extension HTMLResourceContentExtractor {
+    /// The ligature characters the web view spells out, and their letters. Keep it the same as
+    /// `ligatureMap` in `processSpansForTextSpacing` (decorator.js): a ligature spelled out in only
+    /// one of the two texts moves every word after it by a character or two.
+    static let ligatures: [Unicode.Scalar: String] = [
+        "\u{FB00}": "ff",
+        "\u{FB01}": "fi",
+        "\u{FB02}": "fl",
+        "\u{FB03}": "ffi",
+        "\u{FB04}": "ffl",
+        "\u{FB05}": "st",
+        "\u{FB06}": "st",
+        "\u{0132}": "IJ",
+        "\u{0133}": "ij",
+        "\u{0152}": "OE",
+        "\u{0153}": "oe",
+    ]
+
+    /// Spells out the ligature characters of `text`, as the web view does in its own text.
+    static func expandingLigatures(in text: String) -> String {
+        guard text.unicodeScalars.contains(where: { ligatures[$0] != nil }) else {
+            return text
+        }
+        var result = String.UnicodeScalarView()
+        for scalar in text.unicodeScalars {
+            if let letters = ligatures[scalar] {
+                result.append(contentsOf: letters.unicodeScalars)
+            } else {
+                result.append(scalar)
+            }
+        }
+        return String(result)
     }
 }
 

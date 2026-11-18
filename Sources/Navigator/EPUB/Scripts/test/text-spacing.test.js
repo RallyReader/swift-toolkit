@@ -12,6 +12,8 @@
 
 function registerTemplates(body) {
   document.body.innerHTML = body;
+  // A new page loads the scripts again: the text is prepared once per page.
+  jest.resetModules();
   require("../src/decorator").registerTemplates({});
   return document.body.textContent;
 }
@@ -54,6 +56,14 @@ describe("line breaks", () => {
   test("a newline is inserted after every <br/>", () => {
     expect(registerTemplates("<p>one<br/>two</p>")).toBe("one\ntwo");
     expect(document.querySelectorAll("br")).toHaveLength(1);
+  });
+
+  test("registering the templates again adds no second newline (RR-9685)", () => {
+    document.body.innerHTML = "<p>one<br/>two</p><p>three</p>";
+    const decorator = require("../src/decorator");
+    decorator.registerTemplates({});
+    decorator.registerTemplates({});
+    expect(document.body.textContent).toBe("one\ntwo\nthree");
   });
 
   test("a <br> with attributes gets its newline too", () => {
@@ -344,6 +354,9 @@ describe("the navigator's virtual columns (utils.js)", () => {
     appendVirtualColumn();
     const columnAfter = document.body.textContent;
 
+    // A second page: it loads the scripts again (the text is prepared once
+    // per page, RR-9685).
+    jest.resetModules();
     document.body.innerHTML = chapterEnd;
     appendVirtualColumn();
     require("../src/decorator").registerTemplates({});
