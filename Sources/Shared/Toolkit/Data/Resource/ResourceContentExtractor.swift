@@ -51,7 +51,9 @@ class HTMLResourceContentExtractor: ResourceContentExtractor {
             .asyncFlatMap { content in
                 do {
                     // Rally: Fuzi drops HTML entities (" ' …) when parsing the XML, so the entities are unescaped
-                    // before parsing. `&` and `"` are protected through the parsers with placeholders; line breaks
+                    // before parsing. `&`, `<`, `>` and `"` are protected through the parsers with placeholders (a raw
+                    // `&` or `<` is no longer valid XML: the page fell back to SwiftSoup, which read `<` as markup,
+                    // RR-9683); line breaks
                     // and paragraph/div boundaries become new lines; the "ff" ligature is spelled out.
                     // Every `<br>` (`<br/>`, `<br />`, with attributes) gets exactly one new line, like
                     // `separateLineBreaks` in decorator.js gives it in the web view. A word drawn one glyph per
@@ -60,8 +62,9 @@ class HTMLResourceContentExtractor: ResourceContentExtractor {
                         .replacingOccurrences(of: #"<br\b[^>]*>"#, with: "$0\n", options: .regularExpression)
                         .replacingOccurrences(of: "/p><p", with: "/p>\n<p")
                         .replacingOccurrences(of: "/div><div", with: "/div>\n<div")
-                        .replacingOccurrences(of: "&amp;", with: "ampToand")
-                        .replacingOccurrences(of: "&#x0026;", with: "ampToand")
+                        .replacingOccurrences(of: "&(?:amp|#0*38|#[xX]0*26);", with: "ampToand", options: .regularExpression)
+                        .replacingOccurrences(of: "&(?:lt|#0*60|#[xX]0*3[cC]);", with: "rallylessthan", options: .regularExpression)
+                        .replacingOccurrences(of: "&(?:gt|#0*62|#[xX]0*3[eE]);", with: "rallygreaterthan", options: .regularExpression)
                         .replacingOccurrences(of: "&quot;", with: "rallyquote")
                         .replacingOccurrences(of: "\u{FB00}", with: "ff")
                     )
@@ -74,6 +77,8 @@ class HTMLResourceContentExtractor: ResourceContentExtractor {
                     return .success(
                         text
                             .replacingOccurrences(of: "ampToand", with: "&")
+                            .replacingOccurrences(of: "rallylessthan", with: "<")
+                            .replacingOccurrences(of: "rallygreaterthan", with: ">")
                             .replacingOccurrences(of: "rallyquote", with: "\"")
                     )
 
