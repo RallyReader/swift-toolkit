@@ -11,6 +11,7 @@ import {
   toNativeRect,
 } from "./rect";
 import {
+  detachVirtualColumns,
   log,
   logErrorMessage,
   rangeFromLocator,
@@ -131,6 +132,21 @@ export function registerTemplates(newStyles) {
  * This prevents words from being incorrectly stitched together when extracting text.
  */
 function processSpansForTextSpacing() {
+  // Rally: the virtual columns (utils.js) are the navigator's, not the
+  // book's. They are appended once the page has been laid out, which may be
+  // before or after this runs, so they sit out the text preparation: the
+  // <div>/<p> rewrite below put a newline before them only when they were
+  // already there, and the text read aloud ended in "\n\u200B" in some runs
+  // and "\n\n\u200B" in others.
+  const virtualColumns = detachVirtualColumns();
+  try {
+    prepareTextForSpacing();
+  } finally {
+    virtualColumns.forEach((column) => document.body.appendChild(column));
+  }
+}
+
+function prepareTextForSpacing() {
   // Create a mapping of HTML entities to their character equivalents
   const entityMap = {
     "&rsquo;": "'", // right single quote
