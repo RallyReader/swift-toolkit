@@ -126,11 +126,22 @@ export function registerTemplates(newStyles) {
   // );
 }
 
+/** The bodies whose text `processSpansForTextSpacing` has prepared. */
+const preparedBodies = new WeakSet();
+
 /**
  * Processes spans in the document to ensure proper spacing between text segments.
  * This prevents words from being incorrectly stitched together when extracting text.
  */
 function processSpansForTextSpacing() {
+  // Once per page (RR-9685): a second pass gave every <br> a second newline,
+  // moving each word after it one character further than in the text the app
+  // extracts. The body element stays the same through the rewrites below.
+  if (preparedBodies.has(document.body)) {
+    return;
+  }
+  preparedBodies.add(document.body);
+
   // Create a mapping of HTML entities to their character equivalents
   const entityMap = {
     "&rsquo;": "'", // right single quote
