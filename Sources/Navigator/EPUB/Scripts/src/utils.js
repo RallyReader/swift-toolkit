@@ -12,12 +12,9 @@ import {
   getCurrentSelectionLazy,
   getTextFrom,
 } from "./selection";
-import {
-  getClientRectsNoOverlap,
-  rangeBoundingRect,
-  toNativeRect,
-} from "./rect";
+import { getClientRectsNoOverlap, toNativeRect } from "./rect";
 import { wordSpans } from "./word-spans";
+import { displayTypeRect, wordRect } from "./display-type";
 
 /**
  * Least Recently Used Cache with a limit wraping a Map object
@@ -100,6 +97,21 @@ function onViewportWidthChanged() {
   snapCurrentPosition();
 }
 
+const virtualPageId = "readium-virtual-page";
+const virtualColumnClass = "readium-virtual-column";
+
+/**
+ * Rally: removes the virtual columns `appendVirtualColumnIfNeeded` added and
+ * returns them, in order, so they can be put back at the end of the body.
+ */
+export function detachVirtualColumns() {
+  const columns = Array.from(
+    document.querySelectorAll(`#${virtualPageId}, .${virtualColumnClass}`)
+  );
+  columns.forEach((column) => column.remove());
+  return columns;
+}
+
 /**
  * Having an odd number of columns when displaying two columns per screen causes snapping and page
  * turning issues. To fix this, we insert a blank virtual column at the end of the resource.
@@ -112,11 +124,7 @@ function onViewportWidthChanged() {
  * the count even (Junie B. Jones #24, chapter 2, on a 1080 pt wide spread: 9 columns either way).
  */
 export function appendVirtualColumnIfNeeded() {
-  const id = "readium-virtual-page";
-  const className = "readium-virtual-column";
-  document
-    .querySelectorAll(`#${id}, .${className}`)
-    .forEach((column) => column.remove());
+  detachVirtualColumns();
   if (isScrollModeEnabled() || getColumnCountPerScreen() != 2) {
     return;
   }
@@ -131,9 +139,9 @@ export function appendVirtualColumnIfNeeded() {
   for (var i = 0; i < 2 && hasOddColCount(); i++) {
     var virtualCol = document.createElement("div");
     if (i == 0) {
-      virtualCol.setAttribute("id", id);
+      virtualCol.setAttribute("id", virtualPageId);
     }
-    virtualCol.classList.add(className);
+    virtualCol.classList.add(virtualColumnClass);
     virtualCol.style.breakBefore = "column";
     virtualCol.innerHTML = "&#8203;"; // zero-width space
     document.body.appendChild(virtualCol);
@@ -305,7 +313,8 @@ export function rectFromLocator(locator) {
     return toNativeRect(ocrRect);
   }
 
-  return toNativeRect(rangeBoundingRect(range));
+  // Rally (RR-9369): a word in display type is where its ink is.
+  return toNativeRect(wordRect(range));
 }
 
 /**
@@ -638,9 +647,9 @@ export function clientRectFromLocator(locator, reset, cache) {
     // Use OCR-corrected rect
     rect = ocrRect;
   } else {
-    // Use standard rect calculation
-    const clientRects = getClientRectsNoOverlap(range, true);
-    rect = clientRects[0];
+    // Use standard rect calculation. Rally (RR-9369): a word in display type
+    // is where its ink is, not its font's box (word help points at it).
+    rect = displayTypeRect(range) || getClientRectsNoOverlap(range, true)[0];
   }
 
   nativeRect = toNativeRect(rect);
