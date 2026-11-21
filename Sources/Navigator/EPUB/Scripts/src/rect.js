@@ -75,6 +75,10 @@ export function rangeClientRects(range) {
  * word help bubble and the word burst go) was not.
  */
 export function rangeBoundingRect(range) {
+  const letterLines = separatelyLaidOutWordRects(range);
+  if (letterLines) {
+    return unionOf(letterLines);
+  }
   const rect = range.getBoundingClientRect();
   if (!isMismeasured(range, [rect])) {
     return unionOfDrawnRects(Array.from(range.getClientRects())) || rect;
@@ -180,10 +184,193 @@ function unionOf(rects) {
   return makeRect(left, top, right - left, bottom - top);
 }
 
+/**
+ * Rally (RR-9728): the rects of a word whose letters the book lays out one by
+ * one, one rect per line it is drawn on; null for any other range.
+ *
+ * A word on a curve or bouncing along a line puts every letter in its own
+ * element: a rotated `<p>` per letter ("I Play", 9781626725126), or an SVG
+ * `<text>` per glyph. Since RR-6140 such a word is read as one word, so its range
+ * spans those elements, and WebKit gives it each letter's box, at its own height
+ * along the curve, plus the border box of every element wholly inside it: a band
+ * a line high from the letter to the right edge of the page. Underlined rect by
+ * rect, the word had a line under each letter, lines above and through it.
+ * Here each letter is measured on its own (so `rangeClientRects` still applies),
+ * and the letters that share a line make one rect.
+ *
+ * Only for a word spread letter by letter (at most two characters a text node,
+ * nothing drawn between them, no space in its text) over text nodes laid out
+ * apart: in different blocks, inline blocks, transformed elements or SVG. A word
+ * split by inline spans (a styled letter, a kerning span), OCR overlays and words
+ * one per element (a phrase) keep the rects they had.
+ */
+export function separatelyLaidOutWordRects(range) {
+  const parts = wordParts(range);
+  if (!parts || !partsAreLaidOutApart(parts, range.commonAncestorContainer)) {
+    return null;
+  }
+  const rects = [];
+  for (const { node, start, end } of parts) {
+    const part = document.createRange();
+    part.setStart(node, start);
+    part.setEnd(node, end);
+    for (const rect of rangeClientRects(part)) {
+      if (rect.width > 0 && rect.height > 0) {
+        rects.push(rect);
+      }
+    }
+  }
+  const lines = unionByLine(rects, isVertical(parts[0].node));
+  return lines.length > 0 ? lines : null;
+}
+
+/** The longest text node of a word laid out letter by letter. */
+const maxLettersPerPart = 2;
+
+/**
+ * Rally (RR-9728): `rects` in reading order, one union per line: a rect is on the
+ * line of the one before it when they overlap across the line (vertically, or
+ * horizontally in vertical writing) by at least half the bigger one's size.
+ * Letters along a curve chain into one line; a word broken over two lines (or
+ * columns) gives two; a drop cap beside its word's other letters (much taller)
+ * stays apart, as before.
+ */
+export function unionByLine(rects, vertical = false) {
+  const [start, end, size] = vertical
+    ? ["left", "right", "width"]
+    : ["top", "bottom", "height"];
+  const lines = [];
+  let line = [];
+  for (const rect of rects) {
+    const previous = line[line.length - 1];
+    if (previous) {
+      const overlap =
+        Math.min(previous[end], rect[end]) -
+        Math.max(previous[start], rect[start]);
+      if (overlap < Math.max(previous[size], rect[size]) / 2) {
+        lines.push(unionOf(line));
+        line = [];
+      }
+    }
+    line.push(rect);
+  }
+  if (line.length > 0) {
+    lines.push(unionOf(line));
+  }
+  return lines;
+}
+
+function isVertical(node) {
+  const element = node.parentElement;
+  const mode = element ? getComputedStyle(element).writingMode || "" : "";
+  return mode.startsWith("vertical") || mode.startsWith("sideways");
+}
+
+/**
+ * The text of `range` node by node, `{ node, start, end }`, when it is a word
+ * spread letter by letter: more than one text node with text, at most
+ * `maxLettersPerPart` characters each, no space, and nothing drawn between them
+ * (the whitespace-only nodes between the letters' elements are not drawn). Null
+ * otherwise. Walks from the range's start, not its common ancestor's.
+ */
+function wordParts(range) {
+  const root = range.commonAncestorContainer;
+  if (range.collapsed || root.nodeType === Node.TEXT_NODE) {
+    return null;
+  }
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let node = firstTextNode(range, walker);
+  const parts = [];
+  let gapIsDrawn = false;
+  for (; node; node = walker.nextNode()) {
+    if (!range.intersectsNode(node)) {
+      if (parts.length > 0) {
+        break; // past the range's end
+      }
+      continue;
+    }
+    const start = node === range.startContainer ? range.startOffset : 0;
+    const end =
+      node === range.endContainer ? range.endOffset : node.data.length;
+    const text = node.data.slice(start, end);
+    if (!/\S/.test(text)) {
+      // Between two letters: a space the page draws ends the word.
+      gapIsDrawn =
+        gapIsDrawn || (parts.length > 0 && isDrawn(node, start, end));
+      continue;
+    }
+    const letters = text.trim();
+    if (
+      gapIsDrawn ||
+      /\s/.test(letters) ||
+      Array.from(letters).length > maxLettersPerPart ||
+      (node.parentElement && node.parentElement.closest(".text-overlay"))
+    ) {
+      return null;
+    }
+    const leading = text.length - text.trimStart().length;
+    const trailing = text.length - text.trimEnd().length;
+    parts.push({ node, start: start + leading, end: end - trailing });
+  }
+  return parts.length > 1 ? parts : null;
+}
+
+/** The first text node at or after the range's start; `walker` is left on it. */
+function firstTextNode(range, walker) {
+  const container = range.startContainer;
+  if (container.nodeType === Node.TEXT_NODE) {
+    walker.currentNode = container;
+    return container;
+  }
+  const child = container.childNodes[range.startOffset];
+  if (!child) {
+    walker.currentNode = container;
+    return walker.nextNode();
+  }
+  walker.currentNode = child;
+  return child.nodeType === Node.TEXT_NODE ? child : walker.nextNode();
+}
+
+/** Some of the text is drawn: a box wider than nothing. */
+function isDrawn(node, start, end) {
+  const gap = document.createRange();
+  gap.setStart(node, start);
+  gap.setEnd(node, end);
+  return Array.from(gap.getClientRects()).some(
+    (rect) => rect.width > 0 && rect.height > 0
+  );
+}
+
+/** Some part sits in an element below `root` that is not laid out inline with the rest. */
+function partsAreLaidOutApart(parts, root) {
+  return parts.some(({ node }) => {
+    for (
+      let element = node.parentElement;
+      element && element !== root && element.contains(node);
+      element = element.parentElement
+    ) {
+      if (typeof SVGElement !== "undefined" && element instanceof SVGElement) {
+        return true;
+      }
+      const style = getComputedStyle(element);
+      const display = style.display || "inline";
+      const transform = style.transform || "none";
+      if (display !== "inline" || transform !== "none") {
+        return true;
+      }
+    }
+    return false;
+  });
+}
+
 export function getClientRectsNoOverlap(
   range,
   doNotMergeHorizontallyAlignedRects
 ) {
+  const letterLines = separatelyLaidOutWordRects(range);
+  if (letterLines) {
+    return letterLines;
+  }
   let clientRects = rangeClientRects(range);
 
   const tolerance = 1;
