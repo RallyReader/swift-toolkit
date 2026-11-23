@@ -409,6 +409,11 @@ const SVG_TEXT_ELEMENTS = ["text", "tspan", "textPath"];
  * but `textContent` keeps it, so "Rumble" read as "R u m b l e". The decision
  * lives in text-spacing.js, which is covered by tests.
  *
+ * The whitespace between two glyphs can be more than one text node, e.g. a
+ * newline inside the <g> that holds one glyph and another after it (RR-9729,
+ * 9781465411020 p.8): the whole run goes, but only when the page draws none of
+ * it.
+ *
  * Never touches the newline of a <br>, nor whitespace that is drawn or kept as
  * a line break, nor OCR overlays, where each element holds a whole word.
  * Everything is measured before the first removal, so the page is laid out
@@ -423,14 +428,20 @@ function joinGlyphsAcrossUndrawnWhitespace() {
   const transforms = new Map();
   const removable = [];
   const joined = new Set();
-  for (let index = 1; index + 1 < nodes.length; index++) {
-    const node = nodes[index];
-    const previous = nodes[index - 1];
-    const next = nodes[index + 1];
+  for (let index = 0; index < nodes.length; ) {
+    const previous = nodes[index];
+    let end = index + 1;
+    while (end < nodes.length && isWhitespace(nodes[end])) {
+      end++;
+    }
+    const whitespace = nodes.slice(index + 1, end);
+    const next = nodes[end];
+    index = end;
     if (
-      !isUndrawnWhitespace(node) ||
       isWhitespace(previous) ||
-      isWhitespace(next) ||
+      !next ||
+      whitespace.length === 0 ||
+      !whitespace.every(isUndrawnWhitespace) ||
       isOCRWord(previous) ||
       isOCRWord(next)
     ) {
@@ -450,7 +461,7 @@ function joinGlyphsAcrossUndrawnWhitespace() {
         }
       )
     ) {
-      removable.push(node);
+      removable.push(...whitespace);
       joined.add(next);
     }
   }
@@ -492,6 +503,11 @@ function isUndrawnWhitespace(node) {
   if (isLineBreak(node.previousSibling) || isLineBreak(node.nextSibling)) {
     return false;
   }
+  // A space drawn as an SVG text element of its own separates two words, even
+  // where WebKit gives it no width (9781338747836's curved title).
+  if (isSVGSpaceGlyph(parent)) {
+    return false;
+  }
   if (isOutsideSVGText(parent)) {
     return true;
   }
@@ -515,6 +531,14 @@ function isLineBreak(node) {
 /**
  * Whether `element` is an SVG element whose own text SVG never draws.
  */
+function isSVGSpaceGlyph(element) {
+  return (
+    element.namespaceURI === SVG_NAMESPACE &&
+    SVG_TEXT_ELEMENTS.includes(element.localName) &&
+    !/\S/.test(element.textContent)
+  );
+}
+
 function isOutsideSVGText(element) {
   return (
     element.namespaceURI === SVG_NAMESPACE &&
