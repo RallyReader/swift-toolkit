@@ -357,7 +357,20 @@ extension LicenseValidation {
     private func validateIntegrity(of license: LicenseDocument, with passphrase: String) async throws {
         // Creates the DRM context
         let pemCrl = try await crl.retrieve()
-        let context = try client.createContext(jsonLicense: license.jsonString, hashedPassphrase: passphrase, pemCrl: pemCrl)
+        let context: LCPClientContext
+        do {
+            context = try client.createContext(jsonLicense: license.jsonString, hashedPassphrase: passphrase, pemCrl: pemCrl)
+        } catch {
+            // Rally: liblcp reports a CRL it cannot use as an unknown integrity error. Fetch the CRL once more and
+            // try again with it; when that fetch fails or brings the same CRL, the first error stands.
+            guard case .licenseIntegrity(.unknown) = LCPError.wrap(error),
+                  let freshCrl = try? await crl.refresh(timeout: 8),
+                  freshCrl != pemCrl
+            else {
+                throw error
+            }
+            context = try client.createContext(jsonLicense: license.jsonString, hashedPassphrase: passphrase, pemCrl: freshCrl)
+        }
 
         try await raise(.validatedIntegrity(context))
     }
