@@ -184,6 +184,8 @@ function onScroll() {
     if (isRTL()) {
       scrollX = Math.abs(scrollX);
     }
+    // Rally: an offset past the last page (see `pageOffset`) shows the last page (RR-9540).
+    scrollX = Math.min(scrollX, Math.max(totalContentWidth - viewportWidth, 0));
     lastKnownProgressions = {
       first: scrollX / totalContentWidth,
       last: (scrollX + viewportWidth) / totalContentWidth,
@@ -284,9 +286,23 @@ export function scrollToPosition(position, dir, animated) {
   } else {
     var documentWidth = document.scrollingElement.scrollWidth;
     var factor = dir == "rtl" ? -1 : 1;
-    let offset = documentWidth * position * factor;
-    scrollTo({ left: snapOffset(offset), animated });
+    let offset = pageOffset(documentWidth * position, documentWidth);
+    scrollTo({ left: offset * factor, animated });
   }
+}
+
+/**
+ * Rally: the left offset (its magnitude in RTL) of the page showing `offset`, never past the last
+ * page. The end of a resource (`scrollToPosition(1)`, where the navigator preloads the resource
+ * before the one shown) was the whole width, a page past the last: WebKit could report that offset,
+ * and the first visible progression was then 1, the next resource's start. Turned back to, a
+ * one-page cover read "Page 1", "3%" (RR-9540).
+ */
+function pageOffset(offset, documentWidth) {
+  const pageWidth = window.innerWidth;
+  const lastPage = Math.max(documentWidth - pageWidth, 0);
+  const snapped = Math.floor((offset + 1) / pageWidth) * pageWidth;
+  return Math.min(Math.max(snapped, 0), lastPage);
 }
 
 // Scrolls to the first occurrence of the given text snippet.
