@@ -279,10 +279,10 @@ describe("glyphs split by whitespace the page does not draw (RR-6140)", () => {
     expect(
       registerTemplates(
         svg(
-          `${glyph("g", "0 30 0 15")}\n<g>${glyph(" ", "0 30 15 23")}</g>\n${glyph(
-            "o",
-            "0 30 23 38"
-          )}`
+          `${glyph("g", "0 30 0 15")}\n<g>${glyph(
+            " ",
+            "0 30 15 23"
+          )}</g>\n${glyph("o", "0 30 23 38")}`
         )
       )
     ).toBe("g\n \no");
