@@ -375,6 +375,9 @@ extension HTMLResourceContentExtractor {
         guard texts.count > 1 else {
             return svg
         }
+        // A group's closing tag has no attributes even when its opening one moves the group, so group tags may sit
+        // between two glyphs only in an SVG whose groups are all bare.
+        let groupsAreBare = svg.range(of: #"<g\s+[^>]*>"#, options: .regularExpression) == nil
         var result = source.substring(to: texts[0].range.location)
         for (index, text) in texts.enumerated() {
             result += source.substring(with: text.range)
@@ -382,15 +385,33 @@ extension HTMLResourceContentExtractor {
             let gapEnd = index + 1 < texts.count ? texts[index + 1].range.location : source.length
             let gap = source.substring(with: NSRange(location: end, length: gapEnd - end))
             if index + 1 < texts.count,
-               !gap.isEmpty, gap.allSatisfy(\.isWhitespace),
+               let tags = undrawnGapTags(gap, allowingGroupTags: groupsAreBare),
                let previous = Glyph(text, in: source), let next = Glyph(texts[index + 1], in: source),
                next.continuesWord(of: previous)
             {
+                result += tags
                 continue
             }
             result += gap
         }
         return result
+    }
+
+    /// The markup between two `<text>` elements, without its whitespace, when it draws nothing and moves nothing:
+    /// whitespace and, with `allowingGroupTags` (the SVG's groups are all bare), the `<g>` and `</g>` of a group that
+    /// holds one of the glyphs (RR-9729: 9781465411020 p.8 puts the "r" of a curved "ribbit!" in a `<g>` of its own).
+    /// Nil for anything else: a moved group draws its glyph somewhere else than the glyph's own position says.
+    private static func undrawnGapTags(_ gap: String, allowingGroupTags: Bool) -> String? {
+        guard !gap.isEmpty else {
+            return nil
+        }
+        let tags = gap.replacingOccurrences(of: #"\s+"#, with: "", options: .regularExpression)
+        guard tags.isEmpty || (allowingGroupTags
+            && tags.replacingOccurrences(of: #"</?g>"#, with: "", options: .regularExpression).isEmpty)
+        else {
+            return nil
+        }
+        return tags
     }
 
     /// An SVG `<text>` element holding one or two characters, and where it is drawn from.

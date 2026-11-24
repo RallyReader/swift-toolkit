@@ -253,6 +253,56 @@ describe("glyphs split by whitespace the page does not draw (RR-6140)", () => {
     ).toBe("go\n \nup");
   });
 
+  test("SVG letters split by more than one undrawn whitespace node read as one word (RR-9729)", () => {
+    // 9781465411020 p.8: the first letter of the upper "ribbit!" is the only one in a <g>, so the
+    // newline inside the group and the one after it both separate "r" from "i". Boxes measured in
+    // WebKit on that page.
+    expect(
+      registerTemplates(
+        svg(
+          `<g>\n\t\n\t\t${glyph("r", "545 600 107 163")}\n</g>\n${glyph(
+            "i",
+            "560 614 124 175"
+          )}\n${glyph("b", "569 634 138 196")}\n${glyph(
+            "b",
+            "583 649 165 217"
+          )}\n${glyph("i", "595 655 195 229")}\n${glyph(
+            "t",
+            "600 661 212 244"
+          )}\n${glyph("!", "604 665 231 258")}\n`
+        )
+      ).trim()
+    ).toBe("ribbit!");
+  });
+
+  test("letters with a drawn space among the whitespace between them stay apart", () => {
+    expect(
+      registerTemplates(
+        svg(
+          `${glyph("g", "0 30 0 15")}\n<g>${glyph(
+            " ",
+            "0 30 15 23"
+          )}</g>\n${glyph("o", "0 30 23 38")}`
+        )
+      )
+    ).toBe("g\n \no");
+  });
+
+  test("a space drawn as an SVG text element of its own separates words even with no width", () => {
+    // 9781338747836's curved title draws its word spaces as `<text> </text>`, which WebKit gives
+    // no width; "Rumble" and "tumble" must stay two words.
+    expect(
+      registerTemplates(
+        svg(
+          `${glyph("e", "0 30 15 30")}\n${glyph(" ", "0 30 30 30")}\n${glyph(
+            "t",
+            "0 30 31 40"
+          )}`
+        )
+      )
+    ).toBe("e\n \nt");
+  });
+
   test("SVG letters on the next line start a new word", () => {
     expect(
       registerTemplates(

@@ -54,9 +54,28 @@ export function adjustPointToViewport(point) {
  * element, with its text wrapped in a span, and the rects are moved back onto
  * the element. The page's own DOM, and so every live range (decorations keep
  * theirs), is never changed.
+ *
+ * Rally (RR-6184): the same WebKit more often measures such a range one letter
+ * too far along: every range in the text node that holds the first letter is
+ * shifted by the letter's length, and the letter's own box is never reported
+ * ("Mindy Kim and the Big Sibling Plan", 9781665935838: `p.ot::first-letter
+ * { font-size: 2.4em; line-height: 0em; }`). Read aloud's underline for "My" was
+ * drawn under "y " and the start of "name". Such a range is measured on a copy
+ * too, of the element styled with `::first-letter` (`firstLetterBlock`).
+ *
+ * On every WebKit, a word that holds a raised initial (taller than its line, but
+ * sitting on it) is drawn on its line: one underline at the line's bottom, not
+ * the letter's at its own bottom and the rest's at the line's
+ * (`firstLetterOnItsLine`).
  */
 export function rangeClientRects(range) {
   const rects = Array.from(range.getClientRects());
+  const block = firstLetterBlock(range);
+  if (block) {
+    const measured =
+      (webKitShiftsFirstLetterText() && measuredOnCopy(range, block)) || rects;
+    return holdsFirstLetter(range) ? firstLetterOnItsLine(measured) : measured;
+  }
   if (!isMismeasured(range, rects)) {
     return rects;
   }
@@ -80,6 +99,9 @@ export function rangeBoundingRect(range) {
     return unionOf(letterLines);
   }
   const rect = range.getBoundingClientRect();
+  if (firstLetterBlock(range)) {
+    return unionOfDrawnRects(rangeClientRects(range)) || rect;
+  }
   if (!isMismeasured(range, [rect])) {
     return unionOfDrawnRects(Array.from(range.getClientRects())) || rect;
   }
@@ -98,21 +120,224 @@ function isMismeasured(range, rects) {
 }
 
 /**
- * The client rects of `range` (within one text node) measured on a copy of its
- * element: the copy goes in just before the element, so it matches the same
- * selectors (`:first-child`, `p + p`), is hidden, and is removed before anything
- * is drawn. Null when the range spans nodes or the copy can't be measured.
+ * Rally (RR-6184): the element whose `::first-letter` style draws the start of
+ * `range`'s text node; null when there is none, for a range over more than one
+ * node, and for a range past the first letter on a WebKit that measures it right
+ * (nothing to change there; checked first, it is cheap).
+ *
+ * The node must be the first with text in that element (only that one holds the
+ * letter: the text after an inline element measures right), and the element must
+ * be laid out as a block (`::first-letter` applies to nothing else). It may be an
+ * ancestor of the node's parent: `<p class="ot"><span>My name…`.
  */
-function measuredOnCopy(range) {
+function firstLetterBlock(range) {
+  const node = range.startContainer;
+  if (
+    range.collapsed ||
+    node !== range.endContainer ||
+    node.nodeType !== Node.TEXT_NODE ||
+    (!holdsFirstLetter(range) && !webKitShiftsFirstLetterText())
+  ) {
+    return null;
+  }
+  for (
+    let element = node.parentElement;
+    element && element !== document.documentElement;
+    element = element.parentElement
+  ) {
+    if (firstTextNodeIn(element) !== node) {
+      return null;
+    }
+    const display = getComputedStyle(element).display || "inline";
+    if (
+      display !== "inline" &&
+      display !== "contents" &&
+      hasFirstLetterStyle(element)
+    ) {
+      return element;
+    }
+  }
+  return null;
+}
+
+/**
+ * The first letter of a text node, as `::first-letter` takes it: the first
+ * character after any whitespace, with the punctuation before it (`“H`).
+ */
+const firstLetterPattern = /^(\s*)([\p{Ps}\p{Pi}\p{Po}]*\S)/u;
+
+/** `range` (within one text node) holds some of its node's first letter. */
+function holdsFirstLetter(range) {
+  const match = firstLetterPattern.exec(range.startContainer.data);
+  if (!match) {
+    return false;
+  }
+  const start = match[1].length;
+  const end = match[0].length;
+  return range.startOffset < end && range.endOffset > start;
+}
+
+/**
+ * Rally (RR-6184): `rects` of a word that holds a first letter, with the letter's
+ * box (the first, taller than the line) given the top and height of the line
+ * drawn right after it, when the letter sits on that line: it starts above the
+ * line and ends no more than a line below the line's bottom (the letter's own
+ * descent: `line-height: 0`, a raised initial). Underlined, the word is then one
+ * line at the line's bottom. A drop cap floated down beside several lines keeps
+ * its box, so the underline doesn't run through it.
+ */
+export function firstLetterOnItsLine(rects) {
+  const drawn = rects.filter((rect) => rect.width > 0 && rect.height > 0);
+  if (drawn.length < 2) {
+    return rects;
+  }
+  const letter = drawn[0];
+  const line = drawn.find(
+    (rect) =>
+      rect !== letter &&
+      rect.height < letter.height &&
+      rect.left >= letter.right - 2
+  );
+  if (
+    !line ||
+    letter.top >= line.top ||
+    letter.bottom <= line.top ||
+    letter.bottom > line.bottom + line.height
+  ) {
+    return rects;
+  }
+  const onTheLine = makeRect(letter.left, line.top, letter.width, line.height);
+  return rects.map((rect) => (rect === letter ? onTheLine : rect));
+}
+
+/** The first text node in `element` with something other than whitespace. */
+function firstTextNodeIn(element) {
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (/\S/.test(node.data)) {
+      return node;
+    }
+  }
+  return null;
+}
+
+/**
+ * What a `::first-letter` rule sets, for a drop cap's or a raised initial's look:
+ * properties the letter inherits from its element, and the ones it doesn't, with
+ * their initial values.
+ */
+const inheritedFirstLetterProperties = [
+  "fontSize",
+  "fontFamily",
+  "fontWeight",
+  "fontStyle",
+  "lineHeight",
+  "letterSpacing",
+  "textTransform",
+  "color",
+];
+const ownFirstLetterProperties = {
+  float: "none",
+  verticalAlign: "baseline",
+  marginLeft: "0px",
+  marginRight: "0px",
+  paddingLeft: "0px",
+  paddingRight: "0px",
+};
+
+/**
+ * `element`'s first letter is drawn with a style of its own. A property the
+ * letter doesn't inherit counts only when it is neither its initial value nor the
+ * element's: a body or a paragraph with margins of its own has no first-letter
+ * style for that.
+ */
+function hasFirstLetterStyle(element) {
+  const own = getComputedStyle(element);
+  const letter = getComputedStyle(element, "::first-letter");
+  if (!letter) {
+    return false;
+  }
+  return (
+    inheritedFirstLetterProperties.some(
+      (property) => letter[property] !== own[property]
+    ) ||
+    Object.entries(ownFirstLetterProperties).some(
+      ([property, initial]) =>
+        letter[property] !== initial && letter[property] !== own[property]
+    )
+  );
+}
+
+let firstLetterTextShifts = null;
+
+/**
+ * Rally (RR-6184): this WebKit measures a range in `::first-letter` text one
+ * letter too far along (before iOS 27), or as a caret: measured once a
+ * document, on a hidden line "Wi" whose "W" is a first letter. Measured right,
+ * the "W" starts the line; otherwise its range is the "i"'s box, or 0 wide.
+ */
+function webKitShiftsFirstLetterText() {
+  if (firstLetterTextShifts === null) {
+    firstLetterTextShifts = measureFirstLetterShift();
+  }
+  return firstLetterTextShifts === true;
+}
+
+const firstLetterProbeClass = "readium-rally-first-letter-probe";
+
+function measureFirstLetterShift() {
+  const body = document.body;
+  if (!body) {
+    return null;
+  }
+  const style = document.createElement("style");
+  style.textContent = `.${firstLetterProbeClass}::first-letter { font-size: 400% !important; }`;
+  const probe = document.createElement("div");
+  probe.className = firstLetterProbeClass;
+  probe.style.cssText =
+    "position: absolute; left: 0; top: 0; visibility: hidden; pointer-events: none; " +
+    "white-space: nowrap; margin: 0; padding: 0; border: 0; text-indent: 0; " +
+    "text-align: left; direction: ltr; writing-mode: horizontal-tb; font-size: 20px;";
+  probe.textContent = "Wi";
+  (document.head || body).appendChild(style);
+  body.appendChild(probe);
+  try {
+    const letter = document.createRange();
+    letter.setStart(probe.firstChild, 0);
+    letter.setEnd(probe.firstChild, 1);
+    const drawn = Array.from(letter.getClientRects()).find(
+      (rect) => rect.width > 0
+    );
+    const line = probe.getBoundingClientRect();
+    if (!(line.width > 0)) {
+      return null; // Nothing laid out yet (a hidden document): ask again later.
+    }
+    return !drawn || Math.abs(drawn.left - line.left) > 1;
+  } catch (error) {
+    logNative(`measuring a first letter failed: ${error.message}`);
+    return null;
+  } finally {
+    probe.remove();
+    style.remove();
+  }
+}
+
+/**
+ * The client rects of `range` (within one text node) measured on a copy of
+ * `element` (by default the node's parent): the copy goes in just before the
+ * element, so it matches the same selectors (`:first-child`, `p + p`), is hidden,
+ * and is removed before anything is drawn. Null when the range spans nodes or
+ * the copy can't be measured.
+ */
+function measuredOnCopy(range, element = range.startContainer.parentElement) {
   const node = range.startContainer;
   if (node !== range.endContainer || node.nodeType !== Node.TEXT_NODE) {
     return null;
   }
-  const element = node.parentElement;
-  if (!element || !element.parentNode) {
+  if (!element || !element.parentNode || !element.contains(node)) {
     return null;
   }
-  const index = Array.prototype.indexOf.call(element.childNodes, node);
+  const path = childPath(element, node);
   // Before the copy shifts it.
   const elementRect = element.getBoundingClientRect();
   const copy = element.cloneNode(true);
@@ -121,7 +346,10 @@ function measuredOnCopy(range) {
   copy.style.pointerEvents = "none";
   element.parentNode.insertBefore(copy, element);
   try {
-    const copyNode = copy.childNodes[index];
+    const copyNode = path.reduce(
+      (parent, index) => parent.childNodes[index],
+      copy
+    );
     const copyRange = document.createRange();
     copyRange.setStart(copyNode, range.startOffset);
     copyRange.setEnd(copyNode, range.endOffset);
@@ -142,6 +370,17 @@ function measuredOnCopy(range) {
   } finally {
     copy.remove();
   }
+}
+
+/** The child indexes from `ancestor` down to `node`. */
+function childPath(ancestor, node) {
+  const path = [];
+  for (let child = node; child !== ancestor; child = child.parentNode) {
+    path.unshift(
+      Array.prototype.indexOf.call(child.parentNode.childNodes, child)
+    );
+  }
+  return path;
 }
 
 function makeRect(left, top, width, height) {
