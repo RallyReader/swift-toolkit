@@ -72,9 +72,16 @@ export function rangeClientRects(range) {
   const rects = Array.from(range.getClientRects());
   const block = firstLetterBlock(range);
   if (block) {
+    const holdsLetter = holdsFirstLetter(range);
     const measured =
-      (webKitShiftsFirstLetterText() && measuredOnCopy(range, block)) || rects;
-    return holdsFirstLetter(range) ? firstLetterOnItsLine(measured) : measured;
+      (webKitShiftsFirstLetterText() &&
+        measuredOnCopy(
+          range,
+          block,
+          holdsLetter ? floatedFirstLetterStyle(block) : null
+        )) ||
+      rects;
+    return holdsLetter ? firstLetterOnItsLine(measured, range) : measured;
   }
   if (!isMismeasured(range, rects)) {
     return rects;
@@ -100,13 +107,24 @@ export function rangeBoundingRect(range) {
   }
   const rect = range.getBoundingClientRect();
   if (firstLetterBlock(range)) {
-    return unionOfDrawnRects(rangeClientRects(range)) || rect;
+    return firstLetterBoundingRect(range) || rect;
   }
   if (!isMismeasured(range, [rect])) {
     return unionOfDrawnRects(Array.from(range.getClientRects())) || rect;
   }
   const rects = measuredOnCopy(range);
   return rects && rects.length > 0 ? unionOf(rects) : rect;
+}
+
+/**
+ * Rally (RR-9800): the bounding rect of a range in the text of a `::first-letter`
+ * drop cap, as `rangeBoundingRect` measures it; null for any other range, so a
+ * caller can keep measuring those as it did (the selection's rect).
+ */
+export function firstLetterBoundingRect(range) {
+  return firstLetterBlock(range)
+    ? unionOfDrawnRects(rangeClientRects(range))
+    : null;
 }
 
 /** Text that shows, measured only as carets: every rect 0 wide but as tall as a line. */
@@ -185,29 +203,52 @@ function holdsFirstLetter(range) {
  * descent: `line-height: 0`, a raised initial). Underlined, the word is then one
  * line at the line's bottom. A drop cap floated down beside several lines keeps
  * its box, so the underline doesn't run through it.
+ *
+ * Rally (RR-9799): a word that is only the letter ("I", "A") takes the line
+ * from the first character drawn after it (`range`'s).
  */
-export function firstLetterOnItsLine(rects) {
+export function firstLetterOnItsLine(rects, range = null) {
   const drawn = rects.filter((rect) => rect.width > 0 && rect.height > 0);
-  if (drawn.length < 2) {
+  if (drawn.length === 0) {
     return rects;
   }
   const letter = drawn[0];
-  const line = drawn.find(
-    (rect) =>
-      rect !== letter &&
-      rect.height < letter.height &&
-      rect.left >= letter.right - 2
-  );
-  if (
-    !line ||
-    letter.top >= line.top ||
-    letter.bottom <= line.top ||
-    letter.bottom > line.bottom + line.height
-  ) {
+  const line =
+    drawn.find((rect) => rect !== letter && sitsOn(letter, rect)) ||
+    (drawn.length === 1 && range ? characterAfter(range) : null);
+  if (!line || !sitsOn(letter, line)) {
     return rects;
   }
   const onTheLine = makeRect(letter.left, line.top, letter.width, line.height);
   return rects.map((rect) => (rect === letter ? onTheLine : rect));
+}
+
+/** `letter` is taller than `line`, just before it, and sits on it (see `firstLetterOnItsLine`). */
+function sitsOn(letter, line) {
+  return (
+    line.height < letter.height &&
+    line.left >= letter.right - 2 &&
+    letter.top < line.top &&
+    letter.bottom > line.top &&
+    letter.bottom <= line.bottom + line.height
+  );
+}
+
+/** The drawn box of the first character after `range` in its text node, or null. */
+function characterAfter(range) {
+  const node = range.endContainer;
+  const index = node.data.slice(range.endOffset).search(/\S/);
+  if (index === -1) {
+    return null;
+  }
+  const character = document.createRange();
+  character.setStart(node, range.endOffset + index);
+  character.setEnd(node, range.endOffset + index + 1);
+  return (
+    rangeClientRects(character).find(
+      (rect) => rect.width > 0 && rect.height > 0
+    ) || null
+  );
 }
 
 /** The first text node in `element` with something other than whitespace. */
@@ -328,8 +369,17 @@ function measureFirstLetterShift() {
  * element, so it matches the same selectors (`:first-child`, `p + p`), is hidden,
  * and is removed before anything is drawn. Null when the range spans nodes or
  * the copy can't be measured.
+ *
+ * Rally (RR-9798): a span never includes a floated first letter's box, so with
+ * `floatedLetter` (the `::first-letter` style of a floated drop cap the range
+ * holds) the letter is drawn on the copy by a span of its own with that style,
+ * the copy's `::first-letter` is turned off, and the letter's box comes first.
  */
-function measuredOnCopy(range, element = range.startContainer.parentElement) {
+function measuredOnCopy(
+  range,
+  element = range.startContainer.parentElement,
+  floatedLetter = null
+) {
   const node = range.startContainer;
   if (node !== range.endContainer || node.nodeType !== Node.TEXT_NODE) {
     return null;
@@ -338,6 +388,7 @@ function measuredOnCopy(range, element = range.startContainer.parentElement) {
     return null;
   }
   const path = childPath(element, node);
+  let noFirstLetterStyle = null;
   // Before the copy shifts it.
   const elementRect = element.getBoundingClientRect();
   const copy = element.cloneNode(true);
@@ -350,15 +401,35 @@ function measuredOnCopy(range, element = range.startContainer.parentElement) {
       (parent, index) => parent.childNodes[index],
       copy
     );
-    const copyRange = document.createRange();
-    copyRange.setStart(copyNode, range.startOffset);
-    copyRange.setEnd(copyNode, range.endOffset);
-    const span = document.createElement("span");
-    copyRange.surroundContents(span);
+    const letter = floatedLetter && firstLetterPattern.exec(copyNode.data);
+    // The word after the letter first: wrapping it leaves the letter's offsets as they are.
+    const start = letter
+      ? Math.max(range.startOffset, letter[0].length)
+      : range.startOffset;
+    const span =
+      start < range.endOffset ? document.createElement("span") : null;
+    if (span) {
+      wrap(copyNode, start, range.endOffset, span);
+    }
+    let letterSpan = null;
+    if (letter) {
+      letterSpan = document.createElement("span");
+      for (const property of floatedLetterProperties) {
+        letterSpan.style[property] = floatedLetter[property];
+      }
+      wrap(copyNode, letter[1].length, letter[0].length, letterSpan);
+      copy.classList.add(noFirstLetterClass);
+      noFirstLetterStyle = document.createElement("style");
+      noFirstLetterStyle.textContent = noFirstLetterRule;
+      (document.head || document.body).appendChild(noFirstLetterStyle);
+    }
     const copyRect = copy.getBoundingClientRect();
     const dx = elementRect.left - copyRect.left;
     const dy = elementRect.top - copyRect.top;
-    const rects = Array.from(span.getClientRects())
+    const rects = [
+      ...(letterSpan ? [letterSpan.getBoundingClientRect()] : []),
+      ...(span ? Array.from(span.getClientRects()) : []),
+    ]
       .filter((rect) => rect.width > 0)
       .map((rect) =>
         makeRect(rect.left + dx, rect.top + dy, rect.width, rect.height)
@@ -369,8 +440,66 @@ function measuredOnCopy(range, element = range.startContainer.parentElement) {
     return null;
   } finally {
     copy.remove();
+    if (noFirstLetterStyle) {
+      noFirstLetterStyle.remove();
+    }
   }
 }
+
+function wrap(node, start, end, element) {
+  const range = document.createRange();
+  range.setStart(node, start);
+  range.setEnd(node, end);
+  range.surroundContents(element);
+}
+
+/**
+ * Rally (RR-9798): the `::first-letter` style of `block` when it floats (a drop
+ * cap beside several lines), or null.
+ */
+function floatedFirstLetterStyle(block) {
+  const letter = getComputedStyle(block, "::first-letter");
+  return letter && letter.float && letter.float !== "none" ? letter : null;
+}
+
+/** What draws a floated first letter, copied onto the span that stands in for it. */
+const floatedLetterProperties = [
+  "float",
+  "fontFamily",
+  "fontSize",
+  "fontWeight",
+  "fontStyle",
+  "lineHeight",
+  "verticalAlign",
+  "letterSpacing",
+  "textTransform",
+  "marginTop",
+  "marginRight",
+  "marginBottom",
+  "marginLeft",
+  "paddingTop",
+  "paddingRight",
+  "paddingBottom",
+  "paddingLeft",
+  "borderTopWidth",
+  "borderRightWidth",
+  "borderBottomWidth",
+  "borderLeftWidth",
+  "borderTopStyle",
+  "borderRightStyle",
+  "borderBottomStyle",
+  "borderLeftStyle",
+];
+
+const noFirstLetterClass = "readium-rally-no-first-letter";
+
+/** Turns the copy's own `::first-letter` off: the letter's span draws it. */
+const noFirstLetterRule =
+  `.${noFirstLetterClass}::first-letter { font: inherit !important; ` +
+  "float: none !important; line-height: inherit !important; " +
+  "vertical-align: baseline !important; margin: 0 !important; " +
+  "padding: 0 !important; border: 0 !important; " +
+  "letter-spacing: inherit !important; text-transform: inherit !important; }";
 
 /** The child indexes from `ancestor` down to `node`. */
 function childPath(ancestor, node) {
