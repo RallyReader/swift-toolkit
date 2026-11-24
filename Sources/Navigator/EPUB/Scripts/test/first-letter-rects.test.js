@@ -4,7 +4,7 @@
 //  available in the top-level LICENSE file of the project.
 //
 
-// Rally (RR-6184): measuring a range in the text of a `::first-letter` drop cap.
+// Rally (RR-6184, RR-9798, RR-9799, RR-9800): measuring a range in the text of a `::first-letter` drop cap.
 //
 // WebKit before iOS 27 measures every range in the text node that holds a paragraph's first letter
 // one letter too far along, and never reports the letter's own box ("Mindy Kim and the Big Sibling
@@ -113,6 +113,15 @@ beforeEach(() => {
     return box({ left, top, width: right - left, height: bottom - top });
   };
   Element.prototype.getBoundingClientRect = function () {
+    if (this.style.float === "left" && this.closest('[aria-hidden="true"]')) {
+      // The span standing in for a floated first letter on a copy (RR-9798).
+      return box({
+        left: copyOffset.x,
+        top: copyOffset.y,
+        width: 10,
+        height: 102,
+      });
+    }
     const isCopy = this.getAttribute("aria-hidden") === "true";
     return box({
       left: isCopy ? copyOffset.x : 0,
@@ -140,7 +149,12 @@ beforeEach(() => {
   window.getComputedStyle = (element, pseudo) => {
     const style = realGetComputedStyle(element);
     if (pseudo === "::first-letter" && element.classList.contains("drop")) {
-      return { ...style, display: style.display, fontSize: "48px" };
+      return {
+        ...style,
+        display: style.display,
+        fontSize: "48px",
+        float: element.classList.contains("float") ? "left" : "none",
+      };
     }
     return style;
   };
@@ -272,5 +286,82 @@ describe("from iOS 27, a word in a drop cap's text", () => {
     expect(rect.rangeClientRects(range)).toEqual(measureRange(range));
     expect(insertBefore).not.toHaveBeenCalled();
     insertBefore.mockRestore();
+  });
+});
+
+// Rally (RR-9798): a span never includes a floated first letter's box, so the copy draws the letter
+// with a span of its own, floated like the letter.
+describe("before iOS 27, a word with a floated drop cap", () => {
+  test("is measured with the drop cap's box first", () => {
+    document.body.innerHTML = '<p class="drop float">Once upon a time.</p>';
+    expect(rect.rangeClientRects(rangeOf("Once"))).toMatchObject([
+      { left: 0, top: 0, width: 10, height: 102 },
+      { left: 10, top: 0, width: 30, height: 34 },
+    ]);
+  });
+
+  test("leaves the page as it was, its first-letter rule too", () => {
+    document.head.innerHTML = "<title>chapter</title>";
+    document.body.innerHTML = '<p class="drop float">Once upon a time.</p>';
+    const head = document.head.innerHTML;
+    const body = document.body.innerHTML;
+
+    rect.rangeClientRects(rangeOf("Once"));
+
+    expect(document.head.innerHTML).toBe(head);
+    expect(document.body.innerHTML).toBe(body);
+  });
+
+  test("past the drop cap is measured as before", () => {
+    document.body.innerHTML = '<p class="drop float">Once upon a time.</p>';
+    expect(rect.rangeClientRects(rangeOf("upon"))).toMatchObject([
+      { left: 50, top: 0, width: 40, height: 34 },
+    ]);
+  });
+});
+
+// Rally (RR-9799): a word that is only the drop cap takes its line from the character after it.
+describe("from iOS 27, a one-letter word drawn as a drop cap", () => {
+  beforeEach(() => {
+    webKitShifts = false;
+  });
+
+  test("is drawn on its line", () => {
+    document.body.innerHTML = '<p class="drop">I had everything.</p>';
+    expect(rect.rangeClientRects(rangeOf("I"))).toMatchObject([
+      { left: 0, top: 0, width: 10, height: 34 },
+    ]);
+  });
+
+  test("alone in its paragraph keeps its box", () => {
+    document.body.innerHTML = '<p class="drop">I</p>';
+    const range = rangeOf("I");
+    expect(rect.rangeClientRects(range)).toEqual(measureRange(range));
+  });
+});
+
+// Rally (RR-9800): the selection's rect, which the app places the selection menu from.
+describe("the selection's rect", () => {
+  function selectionRect(word) {
+    global.readium = { link: { href: "chapter.xhtml" } };
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(rangeOf(word));
+    return require("../src/selection").getCurrentSelectionLazy().rect;
+  }
+
+  afterEach(() => {
+    delete global.readium;
+  });
+
+  test("before iOS 27, in a drop cap's text, is where the word is drawn", () => {
+    document.body.innerHTML = '<p class="drop">My name is Mindy Kim.</p>';
+    expect(selectionRect("name")).toMatchObject({ left: 30, width: 40 });
+  });
+
+  test("elsewhere is WebKit's", () => {
+    document.body.innerHTML = "<p>My name is Mindy Kim.</p>";
+    expect(selectionRect("name")).toMatchObject({ left: 30, width: 40 });
+    expect(rect.firstLetterBoundingRect(rangeOf("name"))).toBeNull();
   });
 });

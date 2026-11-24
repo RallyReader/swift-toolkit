@@ -5,7 +5,7 @@
 //
 
 import { log as logNative, logError, getOCRCorrectedRect } from "./utils";
-import { toNativeRect } from "./rect";
+import { firstLetterBoundingRect, toNativeRect } from "./rect";
 import { TextRange } from "./vendor/hypothesis/anchoring/text-range";
 
 // Polyfill for iOS 12
@@ -66,8 +66,12 @@ function getSelectionRect() {
       return toNativeRect(ocrRect);
     }
 
-    // Fallback to standard rect for non-OCR content
-    return toNativeRect(range.getBoundingClientRect());
+    // Fallback to standard rect for non-OCR content. Rally (RR-9800): in the text
+    // of a `::first-letter` drop cap, WebKit before iOS 27 measures a range one
+    // letter too far along (RR-6184).
+    return toNativeRect(
+      firstLetterBoundingRect(range) || range.getBoundingClientRect()
+    );
   } catch (e) {
     logError(e);
     return null;
