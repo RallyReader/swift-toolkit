@@ -29,3 +29,21 @@ export function wordSpans(text) {
   }
   return spans;
 }
+
+/**
+ * Rally (RR-8475): whether `word` (a span of `wordSpans`) is zero-width
+ * characters alone, which `\S` matches (they are not white space) but nobody
+ * reads. The blank virtual column (`appendVirtualColumnIfNeeded`, utils.js)
+ * holds a zero-width space, which was the first word of the empty right-hand
+ * page at a chapter's end on a two-page spread: "Start on this page" offered
+ * that page, and choosing it started reading at the chapter's beginning (the
+ * app's text of the chapter has no such word).
+ *
+ * Only the first visible word skips them. The last visible word and the
+ * chapter's last word (`getLastWordText`) both still give the virtual column's
+ * space, and the app compares the two to tell that the chapter's last page is
+ * shown (`PreviewGate.isShowingLastPageOfChapter`).
+ */
+export function isZeroWidthOnly(word) {
+  return /^[\u200B-\u200D\u2060\uFEFF]+$/.test(word);
+}

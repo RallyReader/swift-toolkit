@@ -13,8 +13,9 @@
 // pages at `pageStarts`, each page is 300 px wide, a character is 8 px (a page holds 37), and the screen shows the
 // pages from `firstPageOnScreen` on, as many as fit `window.innerWidth`.
 
-const { wordSpans } = require("../src/word-spans");
+const { isZeroWidthOnly, wordSpans } = require("../src/word-spans");
 const {
+  appendVirtualColumnIfNeeded,
   getFirstVisibleWordText,
   getFirstVisibleWordTextOnSide,
   getLastVisibleWordText,
@@ -56,7 +57,16 @@ function box(left, right) {
   };
 }
 
+// Rally (RR-8475): text outside the paragraph (the navigator's blank virtual column) is zero-width
+// characters at the start of the page after the paragraph's last, inside its margin.
+const pageMargin = 20;
+
 function measureRange(range) {
+  if (range.startContainer.parentElement !== document.body.firstElementChild) {
+    const left =
+      (pageStarts.length - firstPageOnScreen) * pageWidth + pageMargin;
+    return box(left, left);
+  }
   const start = range.startOffset;
   const end =
     range.endContainer === range.startContainer
@@ -106,6 +116,20 @@ describe("wordSpans", () => {
 
   test("has no words in blank text", () => {
     expect(wordSpans(" \n\t")).toEqual([]);
+  });
+});
+
+// RR-8475: the virtual column's zero-width space was a word.
+describe("isZeroWidthOnly", () => {
+  test("is true for zero-width characters alone", () => {
+    ["\u200B", "\u200C\u200D", "\u2060\uFEFF"].forEach((word) =>
+      expect(isZeroWidthOnly(word)).toBe(true)
+    );
+  });
+
+  test("is false for a word, one with a zero-width character in it too", () => {
+    expect(isZeroWidthOnly("home")).toBe(false);
+    expect(isZeroWidthOnly("home\u200Bward")).toBe(false);
   });
 });
 
@@ -161,5 +185,67 @@ describe("a paragraph that runs over a page break", () => {
     expect(right).not.toBeNull();
     expect(right.text.highlight).toBe("Her");
     expect(right.text.before.endsWith("home. Her way back home. ")).toBe(true);
+  });
+});
+
+// Rally (RR-8475): a chapter whose last page is the left-hand page of a two-page spread. The
+// navigator adds a blank virtual column for the right-hand page, holding a zero-width space, which
+// was that page's first word: "Start on this page" offered the blank page, and choosing it started
+// reading at the chapter's beginning (Wonder, "How I Came to Life", iPad landscape).
+describe("a chapter's last page on the left of two", () => {
+  const short = "Her way back home. ";
+
+  beforeEach(() => {
+    showParagraph(
+      short + short + short.trim(),
+      [0, short.length, short.length * 2],
+      2
+    );
+    setViewportWidth(pageWidth * 2);
+
+    // Two columns per screen, three in the chapter: the real `appendVirtualColumnIfNeeded` adds one.
+    jest.spyOn(window, "getComputedStyle").mockReturnValue({
+      getPropertyValue: (name) => (name == "column-count" ? "2" : ""),
+    });
+    Object.defineProperty(document.documentElement, "scrollWidth", {
+      configurable: true,
+      get: () =>
+        (pageStarts.length +
+          document.querySelectorAll(".readium-virtual-column").length) *
+        pageWidth,
+    });
+    appendVirtualColumnIfNeeded();
+    jest.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    delete document.documentElement.scrollWidth;
+  });
+
+  test("the navigator added its virtual column, a zero-width space", () => {
+    const columns = document.querySelectorAll(".readium-virtual-column");
+    expect(columns.length).toBe(1);
+    expect(columns[0].textContent).toBe("\u200B");
+  });
+
+  test("the blank right-hand page has no first word", () => {
+    expect(getFirstVisibleWordTextOnSide("right")).toBeNull();
+  });
+
+  test("the left-hand page's first word is the chapter's last page's", () => {
+    const left = getFirstVisibleWordTextOnSide("left");
+
+    expect(left.text.highlight).toBe("Her");
+    expect(left.text.before.endsWith("home. ")).toBe(true);
+  });
+
+  test("the spread's first word is on the left-hand page", () => {
+    expect(getFirstVisibleWordText().text.highlight).toBe("Her");
+  });
+
+  test("the spread's last word is still the virtual column's space", () => {
+    // As the chapter's last word (`getLastWordText`) is: the app compares the two
+    // (`PreviewGate.isShowingLastPageOfChapter`).
+    expect(getLastVisibleWordText().text.highlight).toBe("\u200B");
   });
 });
