@@ -13,7 +13,7 @@ import {
   getTextFrom,
 } from "./selection";
 import { getClientRectsNoOverlap, toNativeRect } from "./rect";
-import { wordSpans } from "./word-spans";
+import { isZeroWidthOnly, wordSpans } from "./word-spans";
 import { displayTypeRect, wordRect } from "./display-type";
 
 /**
@@ -1213,6 +1213,9 @@ export function getFirstVisibleWordText() {
     // Loop through each word to find the first visible word within the viewport.
     // Each word is measured where it is (RR-9654), not where it first appears.
     for (const { word, start, end } of wordSpans(documentNode.nodeValue)) {
+      if (isZeroWidthOnly(word)) {
+        continue; // RR-8475
+      }
       const wordRange = document.createRange();
       wordRange.setStart(documentNode, start);
       wordRange.setEnd(documentNode, end);
@@ -1268,6 +1271,9 @@ export function getFirstVisibleWordTextOnSide(side) {
   while ((documentNode = nodeIterator.nextNode())) {
     // Each word is measured where it is (RR-9654), not where it first appears.
     for (const { word, start, end } of wordSpans(documentNode.nodeValue)) {
+      if (isZeroWidthOnly(word)) {
+        continue; // RR-8475: the blank virtual column's space
+      }
       const wordRange = document.createRange();
       wordRange.setStart(documentNode, start);
       wordRange.setEnd(documentNode, end);
