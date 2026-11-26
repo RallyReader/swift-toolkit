@@ -340,13 +340,16 @@ describe("from iOS 27, a one-letter word drawn as a drop cap", () => {
   });
 });
 
-// Rally (RR-9800): the selection's rect, which the app places the selection menu from.
+// Rally (RR-9800): the selection's rect, which the app places the selection menu from. Before
+// iOS 27, a selection made in a drop cap's text holds a range one letter early (" nam" with "name"
+// highlighted: WebKit maps what is drawn to the text by the same mistake it measures with), so
+// WebKit's own rect for it is where the highlight is drawn, and measuring the range right is not.
 describe("the selection's rect", () => {
-  function selectionRect(word) {
+  function selectionRect(range) {
     global.readium = { link: { href: "chapter.xhtml" } };
     const selection = window.getSelection();
     selection.removeAllRanges();
-    selection.addRange(rangeOf(word));
+    selection.addRange(range);
     return require("../src/selection").getCurrentSelectionLazy().rect;
   }
 
@@ -354,14 +357,20 @@ describe("the selection's rect", () => {
     delete global.readium;
   });
 
-  test("before iOS 27, in a drop cap's text, is where the word is drawn", () => {
+  test("before iOS 27, in a drop cap's text, is where WebKit draws the selection", () => {
     document.body.innerHTML = '<p class="drop">My name is Mindy Kim.</p>';
-    expect(selectionRect("name")).toMatchObject({ left: 30, width: 40 });
+    // "name" is drawn at 30 px; the selection WebKit makes over it holds " nam".
+    expect(selectionRect(rangeOf(" nam"))).toMatchObject({
+      left: 30,
+      width: 40,
+    });
   });
 
   test("elsewhere is WebKit's", () => {
     document.body.innerHTML = "<p>My name is Mindy Kim.</p>";
-    expect(selectionRect("name")).toMatchObject({ left: 30, width: 40 });
-    expect(rect.firstLetterBoundingRect(rangeOf("name"))).toBeNull();
+    expect(selectionRect(rangeOf("name"))).toMatchObject({
+      left: 30,
+      width: 40,
+    });
   });
 });

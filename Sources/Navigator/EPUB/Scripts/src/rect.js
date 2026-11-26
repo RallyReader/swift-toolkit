@@ -107,24 +107,13 @@ export function rangeBoundingRect(range) {
   }
   const rect = range.getBoundingClientRect();
   if (firstLetterBlock(range)) {
-    return firstLetterBoundingRect(range) || rect;
+    return unionOfDrawnRects(rangeClientRects(range)) || rect;
   }
   if (!isMismeasured(range, [rect])) {
     return unionOfDrawnRects(Array.from(range.getClientRects())) || rect;
   }
   const rects = measuredOnCopy(range);
   return rects && rects.length > 0 ? unionOf(rects) : rect;
-}
-
-/**
- * Rally (RR-9800): the bounding rect of a range in the text of a `::first-letter`
- * drop cap, as `rangeBoundingRect` measures it; null for any other range, so a
- * caller can keep measuring those as it did (the selection's rect).
- */
-export function firstLetterBoundingRect(range) {
-  return firstLetterBlock(range)
-    ? unionOfDrawnRects(rangeClientRects(range))
-    : null;
 }
 
 /** Text that shows, measured only as carets: every rect 0 wide but as tall as a line. */
