@@ -4,7 +4,8 @@
 //  available in the top-level LICENSE file of the project.
 //
 
-// Rally (RR-6184, RR-9798, RR-9799, RR-9800): measuring a range in the text of a `::first-letter` drop cap.
+// Rally (RR-6184, RR-9798, RR-9799, RR-9800, RR-9855): measuring and selecting a range in the text of a
+// `::first-letter` drop cap.
 //
 // WebKit before iOS 27 measures every range in the text node that holds a paragraph's first letter
 // one letter too far along, and never reports the letter's own box ("Mindy Kim and the Big Sibling
@@ -372,5 +373,186 @@ describe("the selection's rect", () => {
       left: 30,
       width: 40,
     });
+  });
+});
+
+// Rally: the text the reader gets around a selection (its locator's `before` and `after`, which Start
+// Here goes to) is taken from where the selection really is, not from its offsets a letter early.
+describe("the selection's text", () => {
+  function selectionText(range) {
+    global.readium = { link: { href: "chapter.xhtml" } };
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return require("../src/selection").getCurrentSelection().text;
+  }
+
+  afterEach(() => {
+    delete global.readium;
+  });
+
+  test("before iOS 27, in a drop cap's text, is around the word highlighted", () => {
+    document.body.innerHTML = '<p class="drop">My name is Mindy Kim.</p>';
+    const text = selectionText(rangeOf(" nam"));
+    expect(text.highlight).toBe("name");
+    expect(text.before).toBe("My ");
+    expect(text.after.startsWith(" is Mindy")).toBe(true);
+  });
+
+  test("before iOS 27, a selection from the drop cap holds it", () => {
+    document.body.innerHTML = '<p class="drop">My name is Mindy Kim.</p>';
+    const text = selectionText(rangeOf("M"));
+    expect(text.highlight).toBe("My");
+    expect(text.after.startsWith(" name")).toBe(true);
+  });
+
+  test("from iOS 27, is around the selection's own range", () => {
+    webKitShifts = false;
+    document.body.innerHTML = '<p class="drop">My name is Mindy Kim.</p>';
+    const text = selectionText(rangeOf("name"));
+    expect(text.highlight).toBe("name");
+    expect(text.before).toBe("My ");
+  });
+});
+
+// Rally (RR-9855): a long press in a drop cap's text made WebKit select from the page's first drop-cap
+// paragraph to the pressed point. The pressed word is selected in its place, in WebKit's offsets.
+describe("a long press in a drop cap's text", () => {
+  const pageHTML =
+    '<p class="drop">I had everything.</p>' +
+    '<p class="drop" id="second">My name is Mindy Kim.</p>';
+
+  function longPress(caretOffset, selected) {
+    const node = document.querySelector("#second").firstChild;
+    document.caretRangeFromPoint = () => {
+      const caret = document.createRange();
+      caret.setStart(node, caretOffset);
+      return caret;
+    };
+    const {
+      notePress,
+      correctLongPressSelection,
+    } = require("../src/first-letter-selection");
+    notePress(100, 200, false, 0);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(selected());
+    const corrected = correctLongPressSelection(selection, 1000);
+    const range = selection.getRangeAt(0);
+    return {
+      corrected,
+      node: range.startContainer === node && range.endContainer === node,
+      offsets: [range.startOffset, range.endOffset],
+    };
+  }
+
+  /** WebKit's selection: from "had" in the first paragraph to `end` in the second. */
+  function acrossParagraphs(end) {
+    return () => {
+      const range = document.createRange();
+      range.setStart(document.querySelector("p").firstChild, 2);
+      range.setEnd(document.querySelector("#second").firstChild, end);
+      return range;
+    };
+  }
+
+  beforeEach(() => {
+    document.body.innerHTML = pageHTML;
+  });
+
+  afterEach(() => {
+    delete document.caretRangeFromPoint;
+  });
+
+  test("from iOS 27, selects the pressed word", () => {
+    webKitShifts = false;
+    // The caret is right: "na|me".
+    expect(longPress(5, acrossParagraphs(5))).toEqual({
+      corrected: true,
+      node: true,
+      offsets: [3, 7],
+    });
+  });
+
+  test("before iOS 27, selects the pressed word in WebKit's offsets", () => {
+    // The caret is a letter early, and so is the selection of "name": 2 to 6.
+    expect(longPress(4, acrossParagraphs(0))).toEqual({
+      corrected: true,
+      node: true,
+      offsets: [2, 6],
+    });
+  });
+
+  test("before iOS 27, on the drop cap selects its word", () => {
+    // 0 to 1 is "My" before iOS 27.
+    expect(longPress(0, acrossParagraphs(0))).toEqual({
+      corrected: true,
+      node: true,
+      offsets: [0, 1],
+    });
+  });
+
+  test("leaves a selection within the pressed text as WebKit made it", () => {
+    const own = () => {
+      const range = document.createRange();
+      const node = document.querySelector("#second").firstChild;
+      range.setStart(node, 2);
+      range.setEnd(node, 6);
+      return range;
+    };
+    expect(longPress(4, own)).toEqual({
+      corrected: false,
+      node: true,
+      offsets: [2, 6],
+    });
+  });
+
+  test("leaves a selection made long after the press", () => {
+    const node = document.querySelector("#second").firstChild;
+    document.caretRangeFromPoint = () => {
+      const caret = document.createRange();
+      caret.setStart(node, 4);
+      return caret;
+    };
+    const {
+      notePress,
+      correctLongPressSelection,
+    } = require("../src/first-letter-selection");
+    notePress(100, 200, false, 0);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(acrossParagraphs(0)());
+    expect(correctLongPressSelection(selection, 10000)).toBe(false);
+  });
+});
+
+describe("the word at a caret", () => {
+  test("takes letters and apostrophes, not punctuation", () => {
+    const { wordAt } = require("../src/first-letter-selection");
+    const text = "My name is Kim, Mindy's.";
+    expect(wordAt(text, 13)).toEqual({ start: 11, end: 14 }); // "Kim"
+    expect(wordAt(text, 14)).toEqual({ start: 11, end: 14 }); // just after it
+    expect(wordAt(text, 18)).toEqual({ start: 16, end: 23 }); // "Mindy's"
+    expect(wordAt(text, 15)).toBeNull(); // the space after the comma
+  });
+});
+
+// Rally: the read-aloud range of a paragraph's last word runs to the whitespace after the paragraph.
+describe("a range ending at the next node", () => {
+  test("before iOS 27, a drop cap paragraph's last word is measured where it is drawn", () => {
+    document.body.innerHTML =
+      '<p class="drop">My name is Kim.</p>\n<p>Next</p>';
+    const word = rangeOf("Kim.");
+    const range = document.createRange();
+    range.setStart(word.startContainer, word.startOffset);
+    range.setEnd(document.body.childNodes[1], 0);
+    const plain = (value) => JSON.parse(JSON.stringify(value));
+    expect(plain(rect.rangeClientRects(range))).toEqual(
+      plain(rect.rangeClientRects(word))
+    );
+    expect(plain(rect.rangeBoundingRect(range))).toEqual(
+      plain(rect.rangeBoundingRect(word))
+    );
+    expect(plain(rect.rangeClientRects(word))[0].left).toBe(110); // "Kim." as drawn
   });
 });

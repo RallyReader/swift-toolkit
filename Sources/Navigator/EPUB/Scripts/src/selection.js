@@ -6,6 +6,7 @@
 
 import { log as logNative, logError, getOCRCorrectedRect } from "./utils";
 import { toNativeRect } from "./rect";
+import { textRangeOfSelection } from "./first-letter-selection";
 import { TextRange } from "./vendor/hypothesis/anchoring/text-range";
 
 // Polyfill for iOS 12
@@ -132,7 +133,13 @@ function getCurrentSelectionText() {
     return undefined;
   }
 
-  return getTextFrom(highlight, range);
+  // Rally: before iOS 27, a selection in a drop cap's text holds offsets a
+  // letter early; the text around it is taken from where it really is.
+  const textRange = textRangeOfSelection(range);
+  if (textRange !== range) {
+    highlight = textRange.toString();
+  }
+  return getTextFrom(highlight, textRange);
 }
 
 export function getTextFrom(highlight, range) {
