@@ -70,18 +70,19 @@ export function adjustPointToViewport(point) {
  */
 export function rangeClientRects(range) {
   const rects = Array.from(range.getClientRects());
-  const block = firstLetterBlock(range);
+  const own = endingInStartNode(range);
+  const block = firstLetterBlock(own);
   if (block) {
-    const holdsLetter = holdsFirstLetter(range);
+    const holdsLetter = holdsFirstLetter(own);
     const measured =
       (webKitShiftsFirstLetterText() &&
         measuredOnCopy(
-          range,
+          own,
           block,
           holdsLetter ? floatedFirstLetterStyle(block) : null
         )) ||
       rects;
-    return holdsLetter ? firstLetterOnItsLine(measured, range) : measured;
+    return holdsLetter ? firstLetterOnItsLine(measured, own) : measured;
   }
   if (!isMismeasured(range, rects)) {
     return rects;
@@ -106,7 +107,7 @@ export function rangeBoundingRect(range) {
     return unionOf(letterLines);
   }
   const rect = range.getBoundingClientRect();
-  if (firstLetterBlock(range)) {
+  if (firstLetterBlock(endingInStartNode(range))) {
     return unionOfDrawnRects(rangeClientRects(range)) || rect;
   }
   if (!isMismeasured(range, [rect])) {
@@ -114,6 +115,35 @@ export function rangeBoundingRect(range) {
   }
   const rects = measuredOnCopy(range);
   return rects && rects.length > 0 ? unionOf(rects) : rect;
+}
+
+/**
+ * Rally: `range` as the same range ending at its start node's end, when it ends
+ * at the start of a later node with nothing drawn in between; any other range as
+ * it is. The read-aloud range of a paragraph's last word ("days.") runs to the
+ * whitespace after the paragraph, and the `::first-letter` measuring only takes a
+ * range within one text node: before iOS 27 such a word was marked a letter too
+ * far along.
+ */
+function endingInStartNode(range) {
+  const node = range.startContainer;
+  if (node === range.endContainer || node.nodeType !== Node.TEXT_NODE) {
+    return range;
+  }
+  try {
+    const rest = document.createRange();
+    rest.setStart(node, node.data.length);
+    rest.setEnd(range.endContainer, range.endOffset);
+    if (/\S/.test(rest.toString())) {
+      return range;
+    }
+    const own = document.createRange();
+    own.setStart(node, range.startOffset);
+    own.setEnd(node, node.data.length);
+    return own;
+  } catch (error) {
+    return range;
+  }
 }
 
 /** Text that shows, measured only as carets: every rect 0 wide but as tall as a line. */
@@ -147,6 +177,17 @@ function firstLetterBlock(range) {
   ) {
     return null;
   }
+  return firstLetterElementOf(node);
+}
+
+/**
+ * The element whose `::first-letter` style draws the start of the text `node`
+ * (see `firstLetterBlock`), or null.
+ */
+export function firstLetterElementOf(node) {
+  if (!node || node.nodeType !== Node.TEXT_NODE) {
+    return null;
+  }
   for (
     let element = node.parentElement;
     element && element !== document.documentElement;
@@ -172,6 +213,21 @@ function firstLetterBlock(range) {
  * character after any whitespace, with the punctuation before it (`“H`).
  */
 const firstLetterPattern = /^(\s*)([\p{Ps}\p{Pi}\p{Po}]*\S)/u;
+
+/**
+ * Rally: how many characters this WebKit's offsets in the text `node` are early
+ * by: the length of its first letter when `node` starts with one drawn by
+ * `::first-letter` and WebKit before iOS 27 runs (RR-6184), else 0. A selection
+ * made there holds " nam" with "name" highlighted, and the caret at a point is a
+ * letter early too.
+ */
+export function firstLetterShift(node) {
+  if (!webKitShiftsFirstLetterText() || !firstLetterElementOf(node)) {
+    return 0;
+  }
+  const match = firstLetterPattern.exec(node.data);
+  return match ? match[2].length : 0;
+}
 
 /** `range` (within one text node) holds some of its node's first letter. */
 function holdsFirstLetter(range) {

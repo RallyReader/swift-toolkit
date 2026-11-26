@@ -9,6 +9,7 @@ import { adjustPointToViewport } from "./rect";
 import { findNearestInteractiveElement } from "./dom";
 import { getCssSelector } from "css-selector-generator";
 import { getCurrentSelection } from "./selection";
+import { correctLongPressSelection, notePress } from "./first-letter-selection";
 
 let isSelecting = false;
 
@@ -47,8 +48,33 @@ window.addEventListener("DOMContentLoaded", function () {
   document.addEventListener("pointercancel", onPointerCancel, false);
 
   document.addEventListener("selectionchange", function () {
+    // Rally (RR-9855): a long press in a drop cap's text may select across paragraphs.
+    correctLongPressSelection();
     isSelecting = !window.getSelection().isCollapsed;
   });
+
+  // Rally (RR-9855): where a long press began, to find the word it was on.
+  document.addEventListener(
+    "touchstart",
+    function (event) {
+      const touch = event.touches[0];
+      if (touch) {
+        notePress(
+          touch.clientX,
+          touch.clientY,
+          !window.getSelection().isCollapsed
+        );
+      }
+    },
+    { capture: true, passive: true }
+  );
+  document.addEventListener(
+    "touchend",
+    function () {
+      correctLongPressSelection();
+    },
+    { capture: true, passive: true }
+  );
 });
 
 function onClick(event) {
